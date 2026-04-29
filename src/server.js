@@ -14,6 +14,7 @@ assertRequiredEnvForProd();
 
 const app = express();
 const PORT = env.PORT || 3000;
+app.set("trust proxy", 1);
 
 // Middleware
 const allowedOriginsSet = new Set([

@@ -46,44 +46,59 @@ export const handleStripeWebhook = async (req, res) => {
         status: sub.status,
         metadataPlan: sub.metadata?.plan || null,
       });
-      let userId = sub.metadata?.userId;
-      if (!userId && sub.id) {
-        console.log("[Stripe Webhook] Missing metadata.userId, resolving from DB", { subscriptionId: sub.id });
-        const existing = await prisma.subscription.findUnique({
-          where: { stripeSubscriptionId: sub.id },
-          select: { userId: true },
+      const existingBySubId = sub.id
+        ? await prisma.subscription.findUnique({
+            where: { stripeSubscriptionId: sub.id },
+            select: { id: true, userId: true, stripeCustomerId: true, stripeSubscriptionId: true },
+          })
+        : null;
+      const existingByCustomerId = sub.customer
+        ? await prisma.subscription.findUnique({
+            where: { stripeCustomerId: sub.customer },
+            select: { id: true, userId: true, stripeCustomerId: true, stripeSubscriptionId: true },
+          })
+        : null;
+
+      let userId = sub.metadata?.userId || existingBySubId?.userId || existingByCustomerId?.userId || null;
+      if (!userId) {
+        console.log("[Stripe Webhook] Missing userId after metadata/sub/customer lookup", {
+          subscriptionId: sub.id,
+          customerId: sub.customer,
         });
-        userId = existing?.userId || null;
-        console.log("[Stripe Webhook] Resolved userId from DB", { subscriptionId: sub.id, userId });
       }
+
+      const targetRecord = existingBySubId || existingByCustomerId;
+      console.log("[Stripe Webhook] Record lookup", {
+        bySubscriptionId: Boolean(existingBySubId),
+        byCustomerId: Boolean(existingByCustomerId),
+        targetRecordId: targetRecord?.id || null,
+      });
       if (userId) {
-        const existing = await prisma.subscription.findUnique({
-          where: { stripeSubscriptionId: sub.id },
-          select: { id: true },
-        });
-        await prisma.subscription.upsert({
-          where: { stripeSubscriptionId: sub.id },
-          create: {
-            userId,
-            stripeCustomerId: sub.customer,
-            stripeSubscriptionId: sub.id,
-            plan: planFromStripeSub(sub),
-            status: mapStatus(sub.status),
-            trialEndsAt: sub.trial_end ? new Date(sub.trial_end * 1000) : null,
-            currentPeriodEnd: sub.current_period_end ? new Date(sub.current_period_end * 1000) : null,
-          },
-          update: {
-            stripeCustomerId: sub.customer,
-            plan: planFromStripeSub(sub),
-            status: mapStatus(sub.status),
-            trialEndsAt: sub.trial_end ? new Date(sub.trial_end * 1000) : null,
-            currentPeriodEnd: sub.current_period_end ? new Date(sub.current_period_end * 1000) : null,
-          },
-        });
+        const updateData = {
+          userId,
+          stripeCustomerId: sub.customer,
+          stripeSubscriptionId: sub.id,
+          plan: planFromStripeSub(sub),
+          status: mapStatus(sub.status),
+          trialEndsAt: sub.trial_end ? new Date(sub.trial_end * 1000) : null,
+          currentPeriodEnd: sub.current_period_end ? new Date(sub.current_period_end * 1000) : null,
+        };
+
+        if (targetRecord?.id) {
+          await prisma.subscription.update({
+            where: { id: targetRecord.id },
+            data: updateData,
+          });
+        } else {
+          await prisma.subscription.create({
+            data: updateData,
+          });
+        }
         console.log("[Stripe Webhook] Subscription synced", {
-          action: existing ? "update" : "create",
+          action: targetRecord ? "update" : "create",
           userId,
           subscriptionId: sub.id,
+          customerId: sub.customer,
           mappedPlan: planFromStripeSub(sub),
           mappedStatus: mapStatus(sub.status),
         });
