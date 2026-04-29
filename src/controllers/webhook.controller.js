@@ -6,6 +6,7 @@ const mapStatus = (status) => {
   if (status === "active") return "ACTIVE";
   if (status === "trialing") return "TRIALING";
   if (status === "past_due") return "PAST_DUE";
+  if (status === "unpaid" || status === "incomplete_expired") return "CANCELED";
   return "CANCELED";
 };
 
@@ -24,7 +25,14 @@ export const handleStripeWebhook = async (req, res) => {
       event.type === "customer.subscription.deleted"
     ) {
       const sub = event.data.object;
-      const userId = sub.metadata?.userId;
+      let userId = sub.metadata?.userId;
+      if (!userId && sub.id) {
+        const existing = await prisma.subscription.findUnique({
+          where: { stripeSubscriptionId: sub.id },
+          select: { userId: true },
+        });
+        userId = existing?.userId || null;
+      }
       if (userId) {
         await prisma.subscription.upsert({
           where: { stripeSubscriptionId: sub.id },

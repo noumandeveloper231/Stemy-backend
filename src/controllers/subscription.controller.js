@@ -7,6 +7,15 @@ const planMeta = {
   pro: { plan: "PRO", priceId: env.STRIPE_PRO_PRICE_ID },
 };
 
+const sortLatest = [{ updatedAt: "desc" }, { createdAt: "desc" }];
+
+async function getLatestSubscription(userId) {
+  return prisma.subscription.findFirst({
+    where: { userId },
+    orderBy: sortLatest,
+  });
+}
+
 function stripePriceIdError(priceId, envName) {
   if (!priceId || !String(priceId).trim()) {
     return `${envName} is not set. Add a Stripe Price ID (starts with price_) to your server .env.`;
@@ -39,10 +48,7 @@ export const createCheckoutSession = async (req, res) => {
     }
 
     let customerId = null;
-    const latestSub = await prisma.subscription.findFirst({
-      where: { userId: req.userId },
-      orderBy: { createdAt: "desc" },
-    });
+    const latestSub = await getLatestSubscription(req.userId);
     if (latestSub?.stripeCustomerId) {
       customerId = latestSub.stripeCustomerId;
     } else {
@@ -54,13 +60,15 @@ export const createCheckoutSession = async (req, res) => {
       customerId = customer.id;
     }
 
+    const successUrl = new URL("/pages/thank-you.html", env.FRONTEND_URL).toString();
+    const cancelUrl = new URL("/pages/subscription.html?checkout=cancel", env.FRONTEND_URL).toString();
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
       line_items: [{ price: selected.priceId, quantity: 1 }],
       subscription_data: { trial_period_days: 7, metadata: { userId: req.userId, plan: selected.plan } },
-      success_url: `${env.FRONTEND_URL}?checkout=success`,
-      cancel_url: `${env.FRONTEND_URL}?checkout=cancel`,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
     });
 
     return res.json({ url: session.url });
@@ -77,14 +85,14 @@ export const createPortalSession = async (req, res) => {
     }
     const latest = await prisma.subscription.findFirst({
       where: { userId: req.userId, stripeCustomerId: { not: null } },
-      orderBy: { createdAt: "desc" },
+      orderBy: sortLatest,
     });
     if (!latest?.stripeCustomerId) {
       return res.status(404).json({ message: "No Stripe customer found" });
     }
     const session = await stripe.billingPortal.sessions.create({
       customer: latest.stripeCustomerId,
-      return_url: env.FRONTEND_URL,
+      return_url: `${env.FRONTEND_URL}?portal=return`,
     });
     return res.json({ url: session.url });
   } catch (error) {
@@ -94,9 +102,28 @@ export const createPortalSession = async (req, res) => {
 };
 
 export const getCurrentSubscription = async (req, res) => {
-  const current = await prisma.subscription.findFirst({
-    where: { userId: req.userId },
-    orderBy: { createdAt: "desc" },
+  const current = await getLatestSubscription(req.userId);
+  if (!current?.stripeCustomerId || !stripe) {
+    return res.json({ subscription: current, invoices: [] });
+  }
+
+  const invoices = await stripe.invoices.list({
+    customer: current.stripeCustomerId,
+    limit: 10,
   });
-  return res.json({ subscription: current });
+
+  const formattedInvoices = invoices.data.map((invoice) => ({
+    id: invoice.id,
+    hostedInvoiceUrl: invoice.hosted_invoice_url,
+    invoicePdf: invoice.invoice_pdf,
+    status: invoice.status,
+    amountPaid: invoice.amount_paid,
+    amountDue: invoice.amount_due,
+    currency: invoice.currency,
+    created: invoice.created,
+    periodStart: invoice.period_start,
+    periodEnd: invoice.period_end,
+  }));
+
+  return res.json({ subscription: current, invoices: formattedInvoices });
 };

@@ -240,7 +240,7 @@ export const getMe = async (req, res) => {
 
     const currentSubscription = await prisma.subscription.findFirst({
       where: { userId: req.userId },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
     });
 
     return res.json({ user, subscription: currentSubscription });
