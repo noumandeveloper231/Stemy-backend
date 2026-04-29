@@ -10,6 +10,14 @@ const mapStatus = (status) => {
   return "CANCELED";
 };
 
+const planFromStripeSub = (sub) => {
+  if (sub?.metadata?.plan === "PRO") return "PRO";
+  if (sub?.metadata?.plan === "BASIC") return "BASIC";
+  const priceId = sub?.items?.data?.[0]?.price?.id;
+  if (priceId && priceId === env.STRIPE_PRO_PRICE_ID) return "PRO";
+  return "BASIC";
+};
+
 export const handleStripeWebhook = async (req, res) => {
   try {
     if (!stripe || !env.STRIPE_WEBHOOK_SECRET) {
@@ -18,6 +26,12 @@ export const handleStripeWebhook = async (req, res) => {
 
     const signature = req.headers["stripe-signature"];
     const event = stripe.webhooks.constructEvent(req.body, signature, env.STRIPE_WEBHOOK_SECRET);
+    console.log("[Stripe Webhook] Received", {
+      id: event.id,
+      type: event.type,
+      livemode: event.livemode,
+      created: event.created,
+    });
 
     if (
       event.type === "customer.subscription.created" ||
@@ -25,47 +39,93 @@ export const handleStripeWebhook = async (req, res) => {
       event.type === "customer.subscription.deleted"
     ) {
       const sub = event.data.object;
+      console.log("[Stripe Webhook] Subscription payload", {
+        eventType: event.type,
+        subscriptionId: sub.id,
+        customerId: sub.customer,
+        status: sub.status,
+        metadataPlan: sub.metadata?.plan || null,
+      });
       let userId = sub.metadata?.userId;
       if (!userId && sub.id) {
+        console.log("[Stripe Webhook] Missing metadata.userId, resolving from DB", { subscriptionId: sub.id });
         const existing = await prisma.subscription.findUnique({
           where: { stripeSubscriptionId: sub.id },
           select: { userId: true },
         });
         userId = existing?.userId || null;
+        console.log("[Stripe Webhook] Resolved userId from DB", { subscriptionId: sub.id, userId });
       }
       if (userId) {
+        const existing = await prisma.subscription.findUnique({
+          where: { stripeSubscriptionId: sub.id },
+          select: { id: true },
+        });
         await prisma.subscription.upsert({
           where: { stripeSubscriptionId: sub.id },
           create: {
             userId,
             stripeCustomerId: sub.customer,
             stripeSubscriptionId: sub.id,
-            plan: sub.metadata?.plan === "PRO" ? "PRO" : "BASIC",
+            plan: planFromStripeSub(sub),
             status: mapStatus(sub.status),
             trialEndsAt: sub.trial_end ? new Date(sub.trial_end * 1000) : null,
             currentPeriodEnd: sub.current_period_end ? new Date(sub.current_period_end * 1000) : null,
           },
           update: {
             stripeCustomerId: sub.customer,
+            plan: planFromStripeSub(sub),
             status: mapStatus(sub.status),
             trialEndsAt: sub.trial_end ? new Date(sub.trial_end * 1000) : null,
             currentPeriodEnd: sub.current_period_end ? new Date(sub.current_period_end * 1000) : null,
           },
+        });
+        console.log("[Stripe Webhook] Subscription synced", {
+          action: existing ? "update" : "create",
+          userId,
+          subscriptionId: sub.id,
+          mappedPlan: planFromStripeSub(sub),
+          mappedStatus: mapStatus(sub.status),
+        });
+      } else {
+        console.warn("[Stripe Webhook] Could not map subscription to user", {
+          subscriptionId: sub.id,
+          eventType: event.type,
         });
       }
     }
 
     if (event.type === "invoice.payment_failed") {
       const invoice = event.data.object;
+      console.log("[Stripe Webhook] Invoice payment failed", {
+        invoiceId: invoice.id,
+        customerId: invoice.customer,
+        amountDue: invoice.amount_due,
+        currency: invoice.currency,
+      });
       await prisma.subscription.updateMany({
         where: { stripeCustomerId: invoice.customer },
         data: { status: "PAST_DUE" },
       });
+      console.log("[Stripe Webhook] Marked subscriptions as PAST_DUE", { customerId: invoice.customer });
+    }
+
+    if (
+      event.type !== "customer.subscription.created" &&
+      event.type !== "customer.subscription.updated" &&
+      event.type !== "customer.subscription.deleted" &&
+      event.type !== "invoice.payment_failed"
+    ) {
+      console.log("[Stripe Webhook] Ignored event type", { type: event.type });
     }
 
     return res.json({ received: true });
   } catch (error) {
-    console.error("Stripe webhook error:", error);
+    console.error("[Stripe Webhook] Error:", {
+      message: error.message,
+      type: error.type,
+      stack: error.stack,
+    });
     return res.status(400).send(`Webhook Error: ${error.message}`);
   }
 };

@@ -6,6 +6,7 @@ const planMeta = {
   basic: { plan: "BASIC", priceId: env.STRIPE_BASIC_PRICE_ID },
   pro: { plan: "PRO", priceId: env.STRIPE_PRO_PRICE_ID },
 };
+const updatableStatuses = new Set(["ACTIVE", "TRIALING", "PAST_DUE"]);
 
 const sortLatest = [{ updatedAt: "desc" }, { createdAt: "desc" }];
 
@@ -14,6 +15,25 @@ async function getLatestSubscription(userId) {
     where: { userId },
     orderBy: sortLatest,
   });
+}
+
+async function ensureStripeCustomerForUser(userId) {
+  const latestSub = await getLatestSubscription(userId);
+  if (latestSub?.stripeCustomerId) return latestSub.stripeCustomerId;
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  const customer = await stripe.customers.create({
+    email: user.email,
+    metadata: { userId },
+  });
+  return customer.id;
+}
+
+async function createBillingPortalRedirect(customerId, returnUrl) {
+  const session = await stripe.billingPortal.sessions.create({
+    customer: customerId,
+    return_url: returnUrl,
+  });
+  return session.url;
 }
 
 function stripePriceIdError(priceId, envName) {
@@ -47,19 +67,36 @@ export const createCheckoutSession = async (req, res) => {
       return res.status(500).json({ message: "Stripe is not configured" });
     }
 
-    let customerId = null;
     const latestSub = await getLatestSubscription(req.userId);
-    if (latestSub?.stripeCustomerId) {
-      customerId = latestSub.stripeCustomerId;
-    } else {
-      const user = await prisma.user.findUnique({ where: { id: req.userId } });
-      const customer = await stripe.customers.create({
-        email: user.email,
-        metadata: { userId: req.userId },
+    if (
+      latestSub?.stripeSubscriptionId &&
+      latestSub?.stripeCustomerId &&
+      updatableStatuses.has(latestSub.status)
+    ) {
+      const stripeSub = await stripe.subscriptions.retrieve(latestSub.stripeSubscriptionId, {
+        expand: ["items.data.price"],
       });
-      customerId = customer.id;
+      const currentItem = stripeSub.items?.data?.[0];
+      if (!currentItem?.id) {
+        return res.status(400).json({ message: "Existing Stripe subscription item not found" });
+      }
+
+      const hasSamePrice = currentItem.price?.id === selected.priceId;
+      if (hasSamePrice) {
+        return res.json({ message: "Subscription is already on this plan", updated: true });
+      }
+
+      const portalUrl = await createBillingPortalRedirect(
+        latestSub.stripeCustomerId,
+        `${env.FRONTEND_URL}?portal=return&intent=plan-change`
+      );
+      return res.json({
+        message: "Redirecting to Stripe to confirm plan change",
+        url: portalUrl,
+      });
     }
 
+    const customerId = await ensureStripeCustomerForUser(req.userId);
     const successUrl = new URL("/pages/thank-you.html", env.FRONTEND_URL).toString();
     const cancelUrl = new URL("/pages/subscription.html?checkout=cancel", env.FRONTEND_URL).toString();
     const session = await stripe.checkout.sessions.create({
@@ -90,11 +127,8 @@ export const createPortalSession = async (req, res) => {
     if (!latest?.stripeCustomerId) {
       return res.status(404).json({ message: "No Stripe customer found" });
     }
-    const session = await stripe.billingPortal.sessions.create({
-      customer: latest.stripeCustomerId,
-      return_url: `${env.FRONTEND_URL}?portal=return`,
-    });
-    return res.json({ url: session.url });
+    const url = await createBillingPortalRedirect(latest.stripeCustomerId, `${env.FRONTEND_URL}?portal=return`);
+    return res.json({ url });
   } catch (error) {
     console.error("Portal error:", error);
     return res.status(500).json({ message: "Failed to create portal session" });
