@@ -1,0 +1,93 @@
+import { prisma } from "../lib/prisma.js";
+import { uploadBuffer, getDownloadUrl } from "../services/storage.service.js";
+import { enqueueMasteringJob } from "../services/queue.service.js";
+
+const ALLOWED_MIME = new Set([
+  "audio/wav",
+  "audio/x-wav",
+  "audio/mpeg",
+  "audio/flac",
+  "audio/x-flac",
+  "audio/mp4",
+  "audio/aiff",
+  "audio/x-aiff",
+]);
+
+export const createQuickMaster = async (req, res) => {
+  try {
+    const file = req.file;
+    const { genre, metadata } = req.body;
+
+    if (!file) {
+      return res.status(400).json({ message: "Audio file is required" });
+    }
+    if (!genre) {
+      return res.status(400).json({ message: "Genre is required" });
+    }
+    if (file.size > 100 * 1024 * 1024) {
+      return res.status(400).json({ message: "File exceeds 100MB limit" });
+    }
+    if (file.mimetype && !ALLOWED_MIME.has(file.mimetype)) {
+      return res.status(400).json({ message: "Unsupported audio format" });
+    }
+
+    const sourceKey = `masters/${req.userId}/${Date.now()}-${file.originalname}`;
+    const sourceUrl = await uploadBuffer({
+      key: sourceKey,
+      body: file.buffer,
+      contentType: file.mimetype,
+    });
+
+    const master = await prisma.master.create({
+      data: {
+        userId: req.userId,
+        genre,
+        type: "QUICK",
+        sourceName: file.originalname,
+        sourceMime: file.mimetype || "application/octet-stream",
+        sourceSize: file.size,
+        sourceUrl,
+        metadata: metadata ? JSON.parse(metadata) : null,
+      },
+    });
+
+    await enqueueMasteringJob(master.id);
+    return res.status(201).json({ master });
+  } catch (error) {
+    console.error("Create quick master error:", error);
+    return res.status(500).json({ message: "Failed to create quick master job" });
+  }
+};
+
+export const listMasters = async (req, res) => {
+  const masters = await prisma.master.findMany({
+    where: { userId: req.userId },
+    orderBy: { createdAt: "desc" },
+  });
+  return res.json({ masters });
+};
+
+export const getMasterById = async (req, res) => {
+  const master = await prisma.master.findFirst({
+    where: { id: req.params.id, userId: req.userId },
+  });
+  if (!master) {
+    return res.status(404).json({ message: "Master not found" });
+  }
+  return res.json({ master });
+};
+
+export const getMasterDownload = async (req, res) => {
+  const master = await prisma.master.findFirst({
+    where: { id: req.params.id, userId: req.userId },
+  });
+  if (!master) {
+    return res.status(404).json({ message: "Master not found" });
+  }
+  if (master.status !== "COMPLETE" || !master.outputUrl) {
+    return res.status(409).json({ message: "Master output is not ready" });
+  }
+
+  const downloadUrl = await getDownloadUrl(master.outputUrl);
+  return res.json({ downloadUrl });
+};

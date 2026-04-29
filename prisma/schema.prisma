@@ -1,0 +1,88 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                 String    @id @default(uuid())
+  email              String    @unique
+  password           String
+  displayName        String?
+  firstName          String?
+  lastName           String?
+  avatarUrl          String?
+  emailVerified      Boolean   @default(false)
+  verificationToken  String?
+  verificationExpiry DateTime?
+  resetToken         String?
+  resetTokenExpiry   DateTime?
+  plan               Plan      @default(BASIC)
+
+  subscriptions Subscription[]
+  masters        Master[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Subscription {
+  id                   String             @id @default(uuid())
+  userId               String
+  stripeCustomerId     String?            @unique
+  stripeSubscriptionId String?            @unique
+  plan                 Plan
+  status               SubscriptionStatus @default(TRIALING)
+  trialEndsAt          DateTime?
+  currentPeriodEnd     DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Master {
+  id          String       @id @default(uuid())
+  userId      String
+  type        MasterType   @default(QUICK)
+  genre       String
+  sourceName  String
+  sourceMime  String
+  sourceSize  Int
+  sourceUrl   String
+  outputUrl   String?
+  metadata    Json?
+  status      MasterStatus @default(QUEUED)
+  lufs        Float?
+  dbtp        Float?
+  error       String?
+  createdAt   DateTime     @default(now())
+  completedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum Plan {
+  BASIC
+  PRO
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELED
+}
+
+enum MasterType {
+  QUICK
+}
+
+enum MasterStatus {
+  QUEUED
+  PROCESSING
+  COMPLETE
+  FAILED
+}
