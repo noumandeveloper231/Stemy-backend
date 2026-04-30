@@ -10,6 +10,36 @@ const updatableStatuses = new Set(["ACTIVE", "TRIALING", "PAST_DUE"]);
 
 const sortLatest = [{ updatedAt: "desc" }, { createdAt: "desc" }];
 
+const mapStripeStatus = (status) => {
+  if (status === "active") return "ACTIVE";
+  if (status === "trialing") return "TRIALING";
+  if (status === "past_due") return "PAST_DUE";
+  return "CANCELED";
+};
+
+function frontendBaseUrl() {
+  const url = new URL(env.FRONTEND_URL);
+  const lastSegment = url.pathname.split("/").pop() || "";
+  if (/\.[a-z0-9]+$/i.test(lastSegment)) {
+    url.pathname = url.pathname.replace(/[^/]*$/, "");
+  }
+  if (!url.pathname.endsWith("/")) {
+    url.pathname += "/";
+  }
+  url.search = "";
+  url.hash = "";
+  return url;
+}
+
+function buildFrontendUrl(relativePath) {
+  const base = frontendBaseUrl();
+  const rel = String(relativePath).replace(/^\/+/, "");
+  const basePath = base.pathname || "/";
+  const baseLooksLikePagesDir = /\/pages\/$/i.test(basePath);
+  const normalizedRel = baseLooksLikePagesDir ? rel : `pages/${rel}`;
+  return new URL(normalizedRel, base).toString();
+}
+
 async function getLatestSubscription(userId) {
   return prisma.subscription.findFirst({
     where: { userId },
@@ -88,7 +118,7 @@ export const createCheckoutSession = async (req, res) => {
 
       const portalUrl = await createBillingPortalRedirect(
         latestSub.stripeCustomerId,
-        `${env.FRONTEND_URL}?portal=return&intent=plan-change`
+        buildFrontendUrl("home.html?portal=return&intent=plan-change")
       );
       return res.json({
         message: "Redirecting to Stripe to confirm plan change",
@@ -97,8 +127,8 @@ export const createCheckoutSession = async (req, res) => {
     }
 
     const customerId = await ensureStripeCustomerForUser(req.userId);
-    const successUrl = new URL("/pages/thank-you.html", env.FRONTEND_URL).toString();
-    const cancelUrl = new URL("/pages/subscription.html?checkout=cancel", env.FRONTEND_URL).toString();
+    const successUrl = buildFrontendUrl("thank-you.html");
+    const cancelUrl = buildFrontendUrl("subscription.html?checkout=cancel");
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
@@ -120,6 +150,7 @@ export const createPortalSession = async (req, res) => {
     if (!stripe) {
       return res.status(500).json({ message: "Stripe is not configured" });
     }
+    const intent = String(req.body?.intent || "manage").toLowerCase();
     const latest = await prisma.subscription.findFirst({
       where: { userId: req.userId, stripeCustomerId: { not: null } },
       orderBy: sortLatest,
@@ -127,7 +158,32 @@ export const createPortalSession = async (req, res) => {
     if (!latest?.stripeCustomerId) {
       return res.status(404).json({ message: "No Stripe customer found" });
     }
-    const url = await createBillingPortalRedirect(latest.stripeCustomerId, `${env.FRONTEND_URL}?portal=return`);
+
+    let url = null;
+    if (intent === "cancel" && latest?.stripeSubscriptionId) {
+      const session = await stripe.billingPortal.sessions.create({
+        customer: latest.stripeCustomerId,
+        return_url: buildFrontendUrl("profile.html?portal=return&intent=cancel"),
+        flow_data: {
+          type: "subscription_cancel",
+          subscription_cancel: {
+            subscription: latest.stripeSubscriptionId,
+          },
+          after_completion: {
+            type: "redirect",
+            redirect: {
+              return_url: buildFrontendUrl("profile.html?portal=return&intent=cancel"),
+            },
+          },
+        },
+      });
+      url = session.url;
+    } else {
+      url = await createBillingPortalRedirect(
+        latest.stripeCustomerId,
+        buildFrontendUrl("profile.html?portal=return")
+      );
+    }
     return res.json({ url });
   } catch (error) {
     console.error("Portal error:", error);
@@ -136,9 +192,43 @@ export const createPortalSession = async (req, res) => {
 };
 
 export const getCurrentSubscription = async (req, res) => {
-  const current = await getLatestSubscription(req.userId);
+  let current = await getLatestSubscription(req.userId);
   if (!current?.stripeCustomerId || !stripe) {
     return res.json({ subscription: current, invoices: [] });
+  }
+
+  if (current?.stripeSubscriptionId) {
+    try {
+      const stripeSub = await stripe.subscriptions.retrieve(current.stripeSubscriptionId);
+      const patchData = {
+        status: mapStripeStatus(stripeSub.status),
+        currentPeriodEnd: stripeSub.current_period_end ? new Date(stripeSub.current_period_end * 1000) : current.currentPeriodEnd,
+        trialEndsAt: stripeSub.trial_end ? new Date(stripeSub.trial_end * 1000) : current.trialEndsAt,
+      };
+      await prisma.subscription.update({
+        where: { id: current.id },
+        data: patchData,
+      });
+      current = {
+        ...current,
+        ...patchData,
+        cancelAtPeriodEnd: Boolean(stripeSub.cancel_at_period_end),
+        canceledAt: stripeSub.canceled_at ? new Date(stripeSub.canceled_at * 1000) : null,
+      };
+    } catch (err) {
+      // Keep response working even if Stripe retrieve has a transient issue.
+      current = {
+        ...current,
+        cancelAtPeriodEnd: false,
+        canceledAt: null,
+      };
+    }
+  } else {
+    current = {
+      ...current,
+      cancelAtPeriodEnd: false,
+      canceledAt: null,
+    };
   }
 
   const invoices = await stripe.invoices.list({

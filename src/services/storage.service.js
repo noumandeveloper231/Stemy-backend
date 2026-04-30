@@ -19,6 +19,19 @@ const s3 = useR2
     })
   : null;
 
+const toPublicUrl = (key) => {
+  const normalizedKey = String(key || "").replace(/^\/+/, "");
+  const base = env.R2_PUBLIC_BASE_URL?.replace(/\/+$/, "");
+  if (base) {
+    return `${base}/${normalizedKey}`;
+  }
+  const endpointHost = env.R2_ENDPOINT?.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  if (endpointHost && env.R2_BUCKET) {
+    return `https://${env.R2_BUCKET}.${endpointHost}/${normalizedKey}`;
+  }
+  return null;
+};
+
 export const uploadBuffer = async ({ key, body, contentType }) => {
   if (!s3) {
     return `local://${key}`;
@@ -33,7 +46,7 @@ export const uploadBuffer = async ({ key, body, contentType }) => {
     }),
   );
 
-  return `r2://${env.R2_BUCKET}/${key}`;
+  return toPublicUrl(key) || `r2://${env.R2_BUCKET}/${key}`;
 };
 
 export const getDownloadUrl = async (storageUrl, expiresIn = 900) => {

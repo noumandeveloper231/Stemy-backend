@@ -35,6 +35,18 @@ try {
 }
 const allowedOrigins = [...allowedOriginsSet].filter(Boolean);
 
+app.use((req, res, next) => {
+  const started = Date.now();
+  res.on("finish", () => {
+    if (req.path.startsWith("/api/users") || req.path.includes("/avatar")) {
+      console.log(
+        `[http] ${req.method} ${req.originalUrl} origin=${req.headers.origin || "n/a"} status=${res.statusCode} ${Date.now() - started}ms`,
+      );
+    }
+  });
+  next();
+});
+
 app.use(
   "/api/webhooks",
   rateLimit({

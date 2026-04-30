@@ -116,7 +116,15 @@ router.post("/me/avatar", authMiddleware, upload.single("avatar"), async (req, r
       return res.status(400).json({ message: "Avatar file is required" });
     }
 
-    const key = `avatars/${req.userId}/${Date.now()}-${req.file.originalname}`;
+    if (!req.file.mimetype?.startsWith("image/")) {
+      return res.status(400).json({ message: "Avatar must be an image file" });
+    }
+
+    const safeName = String(req.file.originalname || "avatar")
+      .replace(/[^\w.\-]/g, "_")
+      .replace(/_{2,}/g, "_");
+
+    const key = `avatars/${req.userId}/${Date.now()}-${safeName}`;
     const avatarUrl = await uploadBuffer({
       key,
       body: req.file.buffer,

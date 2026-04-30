@@ -24,6 +24,7 @@ const authResponse = (user) => ({
 });
 
 const googleClient = env.GOOGLE_CLIENT_ID ? new OAuth2Client(env.GOOGLE_CLIENT_ID) : null;
+const generateVerificationOtp = () => String(Math.floor(100000 + Math.random() * 900000));
 
 export const signup = async (req, res) => {
   try {
@@ -38,8 +39,8 @@ export const signup = async (req, res) => {
     }
 
     const hashed = await bcrypt.hash(password, 10);
-    const verificationToken = randomToken();
-    const verificationExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const verificationToken = generateVerificationOtp();
+    const verificationExpiry = new Date(Date.now() + 10 * 60 * 1000);
 
     const user = await prisma.user.create({
       data: {
@@ -54,11 +55,10 @@ export const signup = async (req, res) => {
       select: safeUserSelect,
     });
 
-    const verifyUrl = `${env.FRONTEND_URL}/verify-email?token=${verificationToken}&email=${encodeURIComponent(email)}`;
     await sendEmail({
       to: email,
-      subject: "Verify your Stemy account",
-      html: `<p>Welcome to Stemy.</p><p>Verify your email: <a href="${verifyUrl}">${verifyUrl}</a></p>`,
+      subject: "Your Stemy verification code",
+      html: `<p>Welcome to Stemy.</p><p>Your verification code is <strong style="font-size:18px;letter-spacing:2px;">${verificationToken}</strong>.</p><p>This code expires in 10 minutes.</p>`,
     });
 
     return res.status(201).json(authResponse(user));
@@ -98,19 +98,20 @@ export const login = async (req, res) => {
 
 export const verifyEmail = async (req, res) => {
   try {
-    const { token, email } = req.body;
-    if (!token || !email) {
-      return res.status(400).json({ message: "Token and email are required" });
+    const { otp, token, email } = req.body;
+    const code = String(otp || token || "").trim();
+    if (!code || !email) {
+      return res.status(400).json({ message: "OTP and email are required" });
     }
 
     const user = await prisma.user.findUnique({ where: { email } });
     if (
       !user ||
-      user.verificationToken !== token ||
+      user.verificationToken !== code ||
       !user.verificationExpiry ||
       user.verificationExpiry < new Date()
     ) {
-      return res.status(400).json({ message: "Invalid or expired verification token" });
+      return res.status(400).json({ message: "Invalid or expired verification code" });
     }
 
     await prisma.user.update({
@@ -137,24 +138,23 @@ export const resendVerification = async (req, res) => {
     }
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
-      return res.json({ message: "If the email exists, a verification link was sent" });
+      return res.json({ message: "If the email exists, a verification code was sent" });
     }
 
-    const verificationToken = randomToken();
-    const verificationExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const verificationToken = generateVerificationOtp();
+    const verificationExpiry = new Date(Date.now() + 10 * 60 * 1000);
     await prisma.user.update({
       where: { id: user.id },
       data: { verificationToken, verificationExpiry },
     });
 
-    const verifyUrl = `${env.FRONTEND_URL}/verify-email?token=${verificationToken}&email=${encodeURIComponent(email)}`;
     await sendEmail({
       to: email,
-      subject: "Your new Stemy verification link",
-      html: `<p>Verify your email: <a href="${verifyUrl}">${verifyUrl}</a></p>`,
+      subject: "Your Stemy verification code",
+      html: `<p>Your verification code is <strong style="font-size:18px;letter-spacing:2px;">${verificationToken}</strong>.</p><p>This code expires in 10 minutes.</p>`,
     });
 
-    return res.json({ message: "If the email exists, a verification link was sent" });
+    return res.json({ message: "If the email exists, a verification code was sent" });
   } catch (error) {
     console.error("Resend verification error:", error);
     return res.status(500).json({ message: "Failed to resend verification" });
