@@ -10,7 +10,7 @@ let pythonProcess = null;
 
 export const startPythonServer = async () => {
   if (env.PYTHON_ENGINE_URL) {
-    console.log("[Python Server] Using external Python engine:", env.PYTHON_ENGINE_URL);
+    console.log("[Python Server] Using external:", env.PYTHON_ENGINE_URL);
     return;
   }
 
@@ -20,62 +20,37 @@ export const startPythonServer = async () => {
   }
 
   const pythonPort = env.PYTHON_PORT || 5050;
-  const pythonUrl = `http://localhost:${pythonPort}`;
+  const pythonUrl = `http://127.0.0.1:${pythonPort}`;
   
-  console.log("[Python Server] Starting Python mastering engine on port", pythonPort);
+  console.log("[Python Server] Starting on port", pythonPort);
 
-  if (env.NODE_ENV === "production") {
-    pythonProcess = spawn("gunicorn", [
-      "-w", "1",
-      "-b", `127.0.0.1:${pythonPort}`,
-      "--timeout", "300",
-      "--log-level", "info",
-      "app:app"
-    ], {
-      cwd: path.join(projectRoot, "mastering_engine"),
-      detached: true,
-      stdio: "ignore",
-    });
-    pythonProcess.unref();
-  } else {
-    pythonProcess = spawn("python3", ["mastering_engine/app.py"], {
-      cwd: projectRoot,
-      env: {
-        ...process.env,
-        PORT: pythonPort,
-        FLASK_ENV: "development",
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    pythonProcess.stdout.on("data", (data) => {
-      console.log("[Python Server]", data.toString().trim());
-    });
-
-    pythonProcess.stderr.on("data", (data) => {
-      console.error("[Python Server Error]", data.toString().trim());
-    });
-  }
-
-  pythonProcess.on("error", (err) => {
-    console.error("[Python Server] Failed to start:", err.message);
+  const pythonScript = path.join(projectRoot, "mastering_engine", "app.py");
+  
+  pythonProcess = spawn("python3", [pythonScript], {
+    cwd: projectRoot,
+    detached: true,
+    stdio: "ignore",
+    env: {
+      ...process.env,
+      PORT: pythonPort,
+      FLASK_ENV: env.NODE_ENV === "production" ? "production" : "development",
+    },
   });
 
-  pythonProcess.on("close", (code) => {
-    if (code !== null) {
-      console.log("[Python Server] Process exited with code", code);
-    }
-  });
+  pythonProcess.unref();
 
-  await new Promise(resolve => setTimeout(resolve, 2000));
-  
+  await new Promise(resolve => setTimeout(resolve, 3000));
+
   process.env.PYTHON_ENGINE_URL = pythonUrl;
-  console.log("[Python Server] Python engine URL set to:", pythonUrl);
+  console.log("[Python Server] Ready at", pythonUrl);
 };
 
 export const stopPythonServer = () => {
-  if (pythonProcess && !pythonProcess.killed) {
-    pythonProcess.kill("SIGTERM");
-    console.log("[Python Server] Stopped");
+  if (pythonProcess) {
+    try {
+      process.kill(-pythonProcess.pid, "SIGTERM");
+    } catch (e) {
+      console.log("[Python Server] Could not kill process");
+    }
   }
 };
