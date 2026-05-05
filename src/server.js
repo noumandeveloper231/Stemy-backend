@@ -19,7 +19,6 @@ const app = express();
 const PORT = env.PORT || 3000;
 app.set("trust proxy", 1);
 
-// Middleware
 const allowedOriginsSet = new Set([
   "http://localhost:8080",
   "http://localhost:5500",
@@ -70,18 +69,19 @@ app.use(
   rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }),
 );
 
-// Health check
 app.get("/", (req, res) => {
-  res.json({ message: "Stemy API is running..." });
+  res.json({ message: "Stemy API is running...", timestamp: Date.now() });
 });
 
-// Routes
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", python: !!env.PYTHON_ENGINE_URL });
+});
+
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
 app.use("/api/masters", masterRoutes);
 
-// Error handler
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({
@@ -91,6 +91,7 @@ app.use((err, req, res, next) => {
 });
 
 let server = null;
+let keepAliveInterval = null;
 
 export const startServer = async () => {
   try {
@@ -98,23 +99,14 @@ export const startServer = async () => {
     
     server = app.listen(PORT, "0.0.0.0", () => {
       console.log(`Server running on port ${PORT}`);
-      console.log(`API URL: http://localhost:${PORT}`);
       startTrialReminderCron();
     });
 
-    const gracefulShutdown = (signal) => {
-      console.log(`Received ${signal}, shutting down...`);
-      if (server) {
-        server.close(() => {
-          console.log("HTTP server closed");
-          stopPythonServer();
-          process.exit(0);
-        });
-      }
-    };
-
-    process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-    process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+    if (env.NODE_ENV === "production") {
+      keepAliveInterval = setInterval(() => {
+        console.log("[KeepAlive] Server heartbeat");
+      }, 25000);
+    }
   } catch (err) {
     console.error("Failed to start server:", err);
     process.exit(1);
