@@ -99,10 +99,25 @@ if (redisConnection) {
         console.log(
           "[QUICK MASTER] Sending request to Python mastering engine...",
         );
-        const pythonResponse = await fetch(`${pythonApiUrl}/master`, {
-          method: "POST",
-          body: formData,
-        });
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+        try {
+          var pythonResponse = await fetch(`${pythonApiUrl}/master`, {
+            method: "POST",
+            body: formData,
+            signal: controller.signal,
+          });
+        } catch (fetchError) {
+          clearTimeout(timeoutId);
+          console.error("[QUICK MASTER] Fetch error:", fetchError.message);
+          if (fetchError.name === "AbortError") {
+            throw new Error("Python engine request timed out after 2 minutes");
+          }
+          throw new Error(`Cannot connect to Python engine: ${fetchError.message}`);
+        }
+        clearTimeout(timeoutId);
 
         console.log(
           "[QUICK MASTER] Python engine response status:",

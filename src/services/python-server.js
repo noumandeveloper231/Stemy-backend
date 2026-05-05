@@ -8,8 +8,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "../..");
 
 let pythonProcess = null;
+let pythonStarted = false;
 
-async function waitForPython(port, timeout = 10000) {
+async function waitForPython(port, timeout = 30000) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     try {
@@ -22,7 +23,7 @@ async function waitForPython(port, timeout = 10000) {
       });
       return true;
     } catch {
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise(r => setTimeout(r, 2000));
     }
   }
   return false;
@@ -64,19 +65,25 @@ export const startPythonServer = async () => {
 
     pythonProcess.on("exit", (code, signal) => {
       console.log("[Python] Process exited with code", code, "signal:", signal);
+      pythonStarted = false;
     });
 
     pythonProcess.unref();
 
-    const ready = await waitForPython(pythonPort, 15000);
+    console.log("[Python] Waiting for server to start...");
+    const ready = await waitForPython(pythonPort, 30000);
+    
     if (ready) {
+      pythonStarted = true;
       process.env.PYTHON_ENGINE_URL = pythonUrl;
       console.log("[Python] Ready at", pythonUrl);
     } else {
-      console.error("[Python] Failed to start within timeout");
+      console.warn("[Python] Health check timeout - server may still be starting");
+      process.env.PYTHON_ENGINE_URL = pythonUrl;
     }
   } catch (err) {
     console.error("[Python] Failed to start:", err.message);
+    process.env.PYTHON_ENGINE_URL = `http://127.0.0.1:${env.PYTHON_PORT || 5050}`;
   }
 };
 
@@ -87,3 +94,5 @@ export const stopPythonServer = () => {
     } catch (e) {}
   }
 };
+
+export const isPythonReady = () => pythonStarted;
