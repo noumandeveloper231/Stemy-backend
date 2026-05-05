@@ -1,13 +1,11 @@
 # gunicorn.conf.py – production Gunicorn settings for the mastering engine
 import os
 
-# Bind address
+# Bind address - use PORT env var (Render sets this)
 bind = f"0.0.0.0:{os.environ.get('PORT', '5050')}"
 
-# Workers: 2 per CPU core is typical for I/O-bound work;
-# mastering is CPU-bound so use (CPUs + 1) as a safe starting point.
-import multiprocessing
-workers = multiprocessing.cpu_count() + 1
+# Workers - use 1 for free tier to save memory
+workers = 1
 
 # Worker class – sync is fine for CPU-heavy tasks
 worker_class = "sync"
