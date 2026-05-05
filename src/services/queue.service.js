@@ -4,6 +4,7 @@ import { env } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
 import { sendEmail } from "../utils/email.js";
 import { getDownloadUrl, uploadBuffer } from "./storage.service.js";
+import { compressAudioIfNeeded } from "./audio-compressor.js";
 
 const redisConnection = env.REDIS_URL
   ? new Redis(env.REDIS_URL, { maxRetriesPerRequest: null })
@@ -80,7 +81,19 @@ if (redisConnection) {
           "bytes",
         );
 
-        // 3. Send to Python Mastering Engine API
+        // 3. Compress audio if needed (files > 50MB)
+        console.log("[QUICK MASTER] Checking if compression needed...");
+        const { buffer: compressedBuffer, wasCompressed } = await compressAudioIfNeeded(
+          sourceBuffer,
+          master.sourceMime,
+          master.sourceName
+        );
+        
+        if (wasCompressed) {
+          console.log("[QUICK MASTER] File was compressed, new size:", compressedBuffer.byteLength, "bytes");
+        }
+
+        // 4. Send to Python Mastering Engine API
         const pythonApiUrl = env.PYTHON_ENGINE_URL;
         console.log(
           "[QUICK MASTER] Sending to Python engine at:",
@@ -90,13 +103,13 @@ if (redisConnection) {
         const formData = new FormData();
         formData.append(
           "file",
-          new Blob([sourceBuffer], { type: master.sourceMime }),
+          new Blob([compressedBuffer], { type: master.sourceMime }),
           master.sourceName,
         );
         formData.append("genre", master.genre);
         console.log(
           "[QUICK MASTER] FormData prepared - file size:",
-          sourceBuffer.byteLength,
+          compressedBuffer.byteLength,
           "genre:",
           master.genre,
         );
