@@ -2,11 +2,31 @@ import { spawn } from "child_process";
 import { env } from "../config/env.js";
 import path from "path";
 import { fileURLToPath } from "url";
+import http from "http";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "../..");
 
 let pythonProcess = null;
+
+async function waitForPython(port, timeout = 10000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    try {
+      await new Promise((resolve, reject) => {
+        const req = http.get(`http://127.0.0.1:${port}/health`, (res) => {
+          resolve(res.statusCode === 200);
+        });
+        req.on("error", reject);
+        req.end();
+      });
+      return true;
+    } catch {
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+  return false;
+}
 
 export const startPythonServer = async () => {
   if (env.PYTHON_ENGINE_URL) {
@@ -48,10 +68,13 @@ export const startPythonServer = async () => {
 
     pythonProcess.unref();
 
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    process.env.PYTHON_ENGINE_URL = pythonUrl;
-    console.log("[Python] Ready at", pythonUrl);
+    const ready = await waitForPython(pythonPort, 15000);
+    if (ready) {
+      process.env.PYTHON_ENGINE_URL = pythonUrl;
+      console.log("[Python] Ready at", pythonUrl);
+    } else {
+      console.error("[Python] Failed to start within timeout");
+    }
   } catch (err) {
     console.error("[Python] Failed to start:", err.message);
   }
