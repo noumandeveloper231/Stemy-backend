@@ -23,14 +23,19 @@ const authResponse = (user) => ({
   user,
 });
 
-const googleClient = env.GOOGLE_CLIENT_ID ? new OAuth2Client(env.GOOGLE_CLIENT_ID) : null;
-const generateVerificationOtp = () => String(Math.floor(100000 + Math.random() * 900000));
+const googleClient = env.GOOGLE_CLIENT_ID
+  ? new OAuth2Client(env.GOOGLE_CLIENT_ID)
+  : null;
+const generateVerificationOtp = () =>
+  String(Math.floor(100000 + Math.random() * 900000));
 
 export const signup = async (req, res) => {
   try {
     const { email, password, displayName, firstName, lastName } = req.body;
     if (!email || !password) {
-      return res.status(400).json({ message: "Email and password are required" });
+      return res
+        .status(400)
+        .json({ message: "Email and password are required" });
     }
 
     const existing = await prisma.user.findUnique({ where: { email } });
@@ -57,6 +62,12 @@ export const signup = async (req, res) => {
 
     await sendEmail({
       to: email,
+      subject: "Welcome to Stemy! 🎵",
+      html: `<div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;padding:24px;background:#0a0a0f;color:#e5e7eb;border-radius:12px;"><h1 style="color:#00e5a0;margin-bottom:16px;">Welcome to Stemy, ${firstName || 'artist'}!</h1><p>Thanks for joining Stemy. Your account has been created and you're ready to start mastering your music.</p><p style="margin-top:16px;">Here's what you can do right now:</p><ul><li>Upload a track and hear it mastered in under 90 seconds</li><li>Try our genre-specific mastering chains (Pop, Hip-Hop, R&B, Rock, and more)</li><li>Start your 7-day free trial — no credit card needed</li></ul><p style="margin-top:20px;">Don't forget to verify your email with the code we just sent you to unlock all features.</p><p style="margin-top:24px;color:#7fff3a;">Let's make your music sound incredible.</p><p style="margin-top:8px;font-size:14px;opacity:0.7;">— Team Stemy</p></div>`,
+    });
+
+    await sendEmail({
+      to: email,
       subject: "Your Stemy verification code",
       html: `<p>Welcome to Stemy.</p><p>Your verification code is <strong style="font-size:18px;letter-spacing:2px;">${verificationToken}</strong>.</p><p>This code expires in 10 minutes.</p>`,
     });
@@ -72,7 +83,9 @@ export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
-      return res.status(400).json({ message: "Email and password are required" });
+      return res
+        .status(400)
+        .json({ message: "Email and password are required" });
     }
 
     const userWithPassword = await prisma.user.findUnique({ where: { email } });
@@ -111,7 +124,9 @@ export const verifyEmail = async (req, res) => {
       !user.verificationExpiry ||
       user.verificationExpiry < new Date()
     ) {
-      return res.status(400).json({ message: "Invalid or expired verification code" });
+      return res
+        .status(400)
+        .json({ message: "Invalid or expired verification code" });
     }
 
     await prisma.user.update({
@@ -138,7 +153,9 @@ export const resendVerification = async (req, res) => {
     }
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
-      return res.json({ message: "If the email exists, a verification code was sent" });
+      return res.json({
+        message: "If the email exists, a verification code was sent",
+      });
     }
 
     const verificationToken = generateVerificationOtp();
@@ -154,7 +171,9 @@ export const resendVerification = async (req, res) => {
       html: `<p>Your verification code is <strong style="font-size:18px;letter-spacing:2px;">${verificationToken}</strong>.</p><p>This code expires in 10 minutes.</p>`,
     });
 
-    return res.json({ message: "If the email exists, a verification code was sent" });
+    return res.json({
+      message: "If the email exists, a verification code was sent",
+    });
   } catch (error) {
     console.error("Resend verification error:", error);
     return res.status(500).json({ message: "Failed to resend verification" });
@@ -170,22 +189,23 @@ export const forgotPassword = async (req, res) => {
 
     const user = await prisma.user.findUnique({ where: { email } });
     if (user) {
-      const resetToken = randomToken();
-      const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000);
+      const resetToken = generateVerificationOtp();
+      const resetTokenExpiry = new Date(Date.now() + 10 * 60 * 1000);
       await prisma.user.update({
         where: { id: user.id },
         data: { resetToken, resetTokenExpiry },
       });
 
-      const resetUrl = `${env.FRONTEND_URL}/reset-password?token=${resetToken}&email=${encodeURIComponent(email)}`;
       await sendEmail({
         to: email,
-        subject: "Reset your Stemy password",
-        html: `<p>Reset your password: <a href="${resetUrl}">${resetUrl}</a></p>`,
+        subject: "Your Stemy password reset code",
+        html: `<p>Your password reset code is <strong style="font-size:18px;letter-spacing:2px;">${resetToken}</strong>.</p><p>This code expires in 10 minutes.</p>`,
       });
     }
 
-    return res.json({ message: "If the email exists, a reset link has been sent" });
+    return res.json({
+      message: "If the email exists, a reset code has been sent",
+    });
   } catch (error) {
     console.error("Forgot password error:", error);
     return res.status(500).json({ message: "Failed to process request" });
@@ -194,19 +214,24 @@ export const forgotPassword = async (req, res) => {
 
 export const resetPassword = async (req, res) => {
   try {
-    const { token, email, password } = req.body;
-    if (!token || !email || !password) {
-      return res.status(400).json({ message: "Token, email and password are required" });
+    const { token, otp, email, password } = req.body;
+    const code = String(otp || token || "").trim();
+    if (!code || !email || !password) {
+      return res
+        .status(400)
+        .json({ message: "Reset code, email and password are required" });
     }
 
     const user = await prisma.user.findUnique({ where: { email } });
     if (
       !user ||
-      user.resetToken !== token ||
+      user.resetToken !== code ||
       !user.resetTokenExpiry ||
       user.resetTokenExpiry < new Date()
     ) {
-      return res.status(400).json({ message: "Invalid or expired reset token" });
+      return res
+        .status(400)
+        .json({ message: "Invalid or expired reset code" });
     }
 
     const hashed = await bcrypt.hash(password, 10);
@@ -219,7 +244,7 @@ export const resetPassword = async (req, res) => {
       },
     });
 
-    return res.json({ message: "Password has been reset" });
+    return res.json({ message: "Password has been reset successfully" });
   } catch (error) {
     console.error("Reset password error:", error);
     return res.status(500).json({ message: "Failed to reset password" });
@@ -278,11 +303,14 @@ export const googleCallback = async (req, res) => {
         picture: payload?.picture || null,
       };
     } else {
-      const userInfoResponse = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
+      const userInfoResponse = await fetch(
+        "https://www.googleapis.com/oauth2/v3/userinfo",
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
         },
-      });
+      );
 
       if (!userInfoResponse.ok) {
         return res.status(401).json({ message: "Invalid Google token" });
@@ -291,7 +319,9 @@ export const googleCallback = async (req, res) => {
       const payload = await userInfoResponse.json();
       profile = {
         email: payload?.email?.toLowerCase(),
-        emailVerified: payload?.email_verified === true || payload?.email_verified === "true",
+        emailVerified:
+          payload?.email_verified === true ||
+          payload?.email_verified === "true",
         name: payload?.name || null,
         givenName: payload?.given_name || null,
         familyName: payload?.family_name || null,
@@ -303,7 +333,9 @@ export const googleCallback = async (req, res) => {
     const emailVerified = profile?.emailVerified;
 
     if (!email || !emailVerified) {
-      return res.status(401).json({ message: "Google account email is not verified" });
+      return res
+        .status(401)
+        .json({ message: "Google account email is not verified" });
     }
 
     let user = await prisma.user.findUnique({

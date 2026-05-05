@@ -1,4 +1,8 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { env } from "../config/env.js";
 
@@ -25,7 +29,10 @@ const toPublicUrl = (key) => {
   if (base) {
     return `${base}/${normalizedKey}`;
   }
-  const endpointHost = env.R2_ENDPOINT?.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  const endpointHost = env.R2_ENDPOINT?.replace(/^https?:\/\//, "").replace(
+    /\/+$/,
+    "",
+  );
   if (endpointHost && env.R2_BUCKET) {
     return `https://${env.R2_BUCKET}.${endpointHost}/${normalizedKey}`;
   }
@@ -54,11 +61,34 @@ export const getDownloadUrl = async (storageUrl, expiresIn = 900) => {
     return storageUrl;
   }
 
-  const key = storageUrl.replace(`r2://${env.R2_BUCKET}/`, "");
+  let key;
+
+  // Handle r2:// format (internal)
+  if (storageUrl.startsWith(`r2://${env.R2_BUCKET}/`)) {
+    key = storageUrl.replace(`r2://${env.R2_BUCKET}/`, "");
+  }
+  // Handle public R2 URLs
+  else if (storageUrl.includes(env.R2_PUBLIC_BASE_URL)) {
+    key = storageUrl.replace(env.R2_PUBLIC_BASE_URL + "/", "");
+  }
+  // Handle direct bucket URLs
+  else if (storageUrl.includes(`${env.R2_BUCKET}.`)) {
+    const url = new URL(storageUrl);
+    key = url.pathname.replace(/^\//, "");
+  }
+  // Handle any other URL format
+  else {
+    console.error("[STORAGE] Cannot extract key from storage URL:", storageUrl);
+    throw new Error("Invalid storage URL format");
+  }
+
+  console.log("[STORAGE] Extracted key:", key);
   const command = new GetObjectCommand({
     Bucket: env.R2_BUCKET,
     Key: key,
   });
 
-  return getSignedUrl(s3, command, { expiresIn });
+  const signedUrl = await getSignedUrl(s3, command, { expiresIn });
+  console.log("[STORAGE] Generated signed URL:", signedUrl);
+  return signedUrl;
 };

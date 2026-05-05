@@ -10,6 +10,9 @@ import subscriptionRoutes from "./routes/subscription.routes.js";
 import webhookRoutes from "./routes/webhook.routes.js";
 import masterRoutes from "./routes/master.routes.js";
 
+import { startTrialReminderCron } from "./cron/trial-reminder.js";
+import { startPythonServer, stopPythonServer } from "./services/python-server.js";
+
 assertRequiredEnvForProd();
 
 const app = express();
@@ -20,7 +23,9 @@ app.set("trust proxy", 1);
 const allowedOriginsSet = new Set([
   "http://localhost:8080",
   "http://localhost:5500",
+  "http://localhost:5501",
   "http://127.0.0.1:5500",
+  "http://127.0.0.1:5501",
   "http://127.0.0.1:8080",
 ]);
 try {
@@ -95,16 +100,31 @@ app.use((err, req, res, next) => {
   });
 });
 
-export const startServer = () =>
-  app.listen(PORT, () => {
+export const startServer = () => {
+  startPythonServer();
+  
+  const server = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`API URL: http://localhost:${PORT}`);
+    startTrialReminderCron();
   });
 
-const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+  const shutdown = () => {
+    console.log("Shutting down gracefully...");
+    stopPythonServer();
+    server.close(() => {
+      console.log("Server closed");
+      process.exit(0);
+    });
+  };
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
+};
+
+const isDirectRun =
+  process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isDirectRun) {
   startServer();
 }
 
 export default app;
-

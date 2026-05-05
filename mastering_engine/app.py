@@ -99,17 +99,30 @@ def genres():
 def master():
     # CORS pre-flight
     if request.method == "OPTIONS":
+        log.info("[QUICK MASTER] CORS pre-flight request")
         return ("", 204, _cors_headers())
+
+    log.info("[QUICK MASTER] New mastering request received")
+    log.info("[QUICK MASTER] Request headers: %s", dict(request.headers))
+    log.info("[QUICK MASTER] Request form data: %s", dict(request.form))
+    log.info("[QUICK MASTER] Request files: %s", list(request.files.keys()))
 
     # ── Validate file ────────────────────────────────────────────────────────
     if "file" not in request.files:
+        log.error("[QUICK MASTER] Missing 'file' field in multipart form")
         abort(400, description="Missing 'file' field in multipart form.")
 
     f = request.files["file"]
+    log.info("[QUICK MASTER] File received: %s", f.filename)
+    log.info("[QUICK MASTER] File content type: %s", f.content_type)
+    log.info("[QUICK MASTER] File size: %s bytes", f.content_length)
+    
     if not f.filename:
+        log.error("[QUICK MASTER] Empty filename")
         abort(400, description="Empty filename.")
 
     if not _is_allowed(f.filename):
+        log.error("[QUICK MASTER] Unsupported file type: %s", f.filename)
         abort(
             415,
             description=(
@@ -120,9 +133,13 @@ def master():
 
     # ── Parse genre ──────────────────────────────────────────────────────────
     genre = (request.form.get("genre") or DEFAULT_GENRE).strip().lower()
+    log.info("[QUICK MASTER] Genre: %s", genre)
+    
     try:
         preset = get_preset(genre)
+        log.info("[QUICK MASTER] Genre preset loaded successfully")
     except KeyError as exc:
+        log.error("[QUICK MASTER] Invalid genre: %s", exc)
         abort(400, description=str(exc))
 
     # Use preset loudness targets (can differ per genre)
@@ -130,7 +147,7 @@ def master():
     t_tp   = preset.get("target_tp_db", TARGET_TP_DB)
 
     log.info(
-        "Request — file=%s size=%s genre=%s target=%.1f LUFS / %.1f dBTP",
+        "[QUICK MASTER] Processing request — file=%s size=%s genre=%s target=%.1f LUFS / %.1f dBTP",
         f.filename,
         f"{f.content_length // 1024} KB" if f.content_length else "?",
         genre,
@@ -140,22 +157,26 @@ def master():
 
     # ── Read raw bytes ────────────────────────────────────────────────────────
     try:
+        log.info("[QUICK MASTER] Reading file bytes...")
         raw = f.read()
+        log.info("[QUICK MASTER] Successfully read %d bytes", len(raw))
     except Exception as exc:
-        log.error("Failed to read upload: %s", exc)
+        log.error("[QUICK MASTER] Failed to read upload: %s", exc)
         abort(500, description="Could not read uploaded file.")
 
     # ── Run mastering chain ───────────────────────────────────────────────────
     t_start = time.perf_counter()
     try:
+        log.info("[QUICK MASTER] Starting audio processing...")
         wav_bytes = master_audio(
             raw,
             genre=genre,
             target_lufs=t_lufs,
             target_tp_db=t_tp,
         )
+        log.info("[QUICK MASTER] Audio processing completed. Output size: %d bytes", len(wav_bytes))
     except Exception as exc:
-        log.exception("Mastering failed for %s: %s", f.filename, exc)
+        log.exception("[QUICK MASTER] Mastering failed for %s: %s", f.filename, exc)
         abort(
             500,
             description=(

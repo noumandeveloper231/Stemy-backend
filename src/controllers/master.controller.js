@@ -15,29 +15,51 @@ const ALLOWED_MIME = new Set([
 
 export const createQuickMaster = async (req, res) => {
   try {
+    console.log("[QUICK MASTER] New Quick Master request received");
+    console.log("[QUICK MASTER] Request user ID:", req.userId);
+    console.log("[QUICK MASTER] Request body keys:", Object.keys(req.body));
+    console.log(
+      "[QUICK MASTER] Request file info:",
+      req.file
+        ? {
+            originalname: req.file.originalname,
+            mimetype: req.file.mimetype,
+            size: req.file.size,
+          }
+        : "No file",
+    );
+
     const file = req.file;
     const { genre, metadata } = req.body;
 
     if (!file) {
+      console.error("[QUICK MASTER] No file provided");
       return res.status(400).json({ message: "Audio file is required" });
     }
     if (!genre) {
+      console.error("[QUICK MASTER] No genre provided");
       return res.status(400).json({ message: "Genre is required" });
     }
     if (file.size > 100 * 1024 * 1024) {
+      console.error("[QUICK MASTER] File too large:", file.size, "bytes");
       return res.status(400).json({ message: "File exceeds 100MB limit" });
     }
     if (file.mimetype && !ALLOWED_MIME.has(file.mimetype)) {
+      console.error("[QUICK MASTER] Unsupported MIME type:", file.mimetype);
       return res.status(400).json({ message: "Unsupported audio format" });
     }
 
     const sourceKey = `masters/${req.userId}/${Date.now()}-${file.originalname}`;
+    console.log("[QUICK MASTER] Uploading to storage with key:", sourceKey);
+
     const sourceUrl = await uploadBuffer({
       key: sourceKey,
       body: file.buffer,
       contentType: file.mimetype,
     });
+    console.log("[QUICK MASTER] File uploaded successfully to:", sourceUrl);
 
+    console.log("[QUICK MASTER] Creating database record...");
     const master = await prisma.master.create({
       data: {
         userId: req.userId,
@@ -50,12 +72,18 @@ export const createQuickMaster = async (req, res) => {
         metadata: metadata ? JSON.parse(metadata) : null,
       },
     });
+    console.log("[QUICK MASTER] Database record created with ID:", master.id);
 
+    console.log("[QUICK MASTER] Enqueuing mastering job...");
     await enqueueMasteringJob(master.id);
+    console.log("[QUICK MASTER] Mastering job enqueued successfully");
+
     return res.status(201).json({ master });
   } catch (error) {
     console.error("Create quick master error:", error);
-    return res.status(500).json({ message: "Failed to create quick master job" });
+    return res
+      .status(500)
+      .json({ message: "Failed to create quick master job" });
   }
 };
 
