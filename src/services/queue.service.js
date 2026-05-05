@@ -57,7 +57,7 @@ if (redisConnection) {
           sourceDownloadUrl,
         );
 
-        // 2. Download the original audio buffer from storage
+        // 2. Download the original audio from storage
         console.log("[QUICK MASTER] Downloading source audio...");
         const sourceResponse = await fetch(sourceDownloadUrl);
         if (!sourceResponse.ok) {
@@ -68,6 +68,12 @@ if (redisConnection) {
           throw new Error("Failed to download source audio");
         }
         const sourceBuffer = await sourceResponse.arrayBuffer();
+        
+        // Check file size (150MB limit)
+        if (sourceBuffer.byteLength > 150 * 1024 * 1024) {
+          throw new Error("File too large. Maximum size is 150MB");
+        }
+        
         console.log(
           "[QUICK MASTER] Successfully downloaded audio. Size:",
           sourceBuffer.byteLength,
@@ -99,8 +105,9 @@ if (redisConnection) {
           "[QUICK MASTER] Sending request to Python mastering engine...",
         );
 
+        // Extended timeout for large files (5 minutes)
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 120000);
+        const timeoutId = setTimeout(() => controller.abort(), 300000);
 
         try {
           var pythonResponse = await fetch(`${pythonApiUrl}/master`, {
