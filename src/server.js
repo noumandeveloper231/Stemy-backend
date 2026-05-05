@@ -100,8 +100,8 @@ app.use((err, req, res, next) => {
   });
 });
 
-export const startServer = () => {
-  startPythonServer();
+export const startServer = async () => {
+  await startPythonServer();
   
   const server = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
