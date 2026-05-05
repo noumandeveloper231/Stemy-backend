@@ -1,6 +1,8 @@
 import { prisma } from "../lib/prisma.js";
 import { uploadBuffer, getDownloadUrl } from "../services/storage.service.js";
 import { enqueueMasteringJob } from "../services/queue.service.js";
+import https from "https";
+import http from "http";
 
 const ALLOWED_PLANS = ["BASIC", "PRO"];
 
@@ -137,6 +139,36 @@ export const getMasterDownload = async (req, res) => {
     return res.status(409).json({ message: "Master output is not ready" });
   }
 
-  const downloadUrl = await getDownloadUrl(master.outputUrl);
-  return res.json({ downloadUrl });
+  // Generate signed URL for storage
+  const signedUrl = await getDownloadUrl(master.outputUrl);
+  
+  // Extract filename from URL
+  const urlObj = new URL(master.outputUrl);
+  const filename = urlObj.pathname.split("/").pop() || "mastered-track.wav";
+  
+  // Set headers for file download
+  res.setHeader("Content-Type", "audio/wav");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.setHeader("Cache-Control", "no-store");
+  
+  // Create proxy request to storage
+  const proxyUrl = new URL(signedUrl);
+  const protocol = proxyUrl.protocol === "https:" ? https : http;
+  
+  const proxyReq = protocol.request(proxyUrl, (proxyRes) => {
+    if (proxyRes.statusCode !== 200) {
+      res.status(proxyRes.statusCode || 500).json({ message: "Failed to fetch file from storage" });
+      return;
+    }
+    
+    // Pipe the response directly
+    proxyRes.pipe(res);
+  });
+  
+  proxyReq.on("error", (err) => {
+    console.error("[DOWNLOAD] Proxy error:", err.message);
+    res.status(500).json({ message: "Failed to download file" });
+  });
+  
+  proxyReq.end();
 };
