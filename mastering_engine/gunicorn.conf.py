@@ -1,8 +1,8 @@
 # gunicorn.conf.py – production Gunicorn settings for the mastering engine
 import os
 
-# Bind address - use PORT env var (Render sets this)
-bind = f"0.0.0.0:{os.environ.get('PORT', '5050')}"
+# Bind address - bind to localhost for single instance deployment
+bind = f"127.0.0.1:{os.environ.get('PORT', '5050')}"
 
 # Workers - use 1 for free tier to save memory
 workers = 1
