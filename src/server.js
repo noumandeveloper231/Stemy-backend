@@ -30,14 +30,11 @@ const allowedOriginsSet = new Set([
 ]);
 try {
   const u = new URL(env.FRONTEND_URL);
-  // Browsers send only `origin` (scheme + host + port), never a path — required for CORS match.
   allowedOriginsSet.add(u.origin);
   if (u.hostname === "localhost" && u.port) {
     allowedOriginsSet.add(`${u.protocol}//127.0.0.1:${u.port}`);
   }
-} catch {
-  /* ignore */
-}
+} catch { /* ignore */ }
 const allowedOrigins = [...allowedOriginsSet].filter(Boolean);
 
 app.use((req, res, next) => {
@@ -54,17 +51,13 @@ app.use((req, res, next) => {
 
 app.use(
   "/api/webhooks",
-  rateLimit({
-    windowMs: 60 * 1000,
-    max: 120,
-  }),
+  rateLimit({ windowMs: 60 * 1000, max: 120 }),
   webhookRoutes,
 );
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps or curl)
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
       callback(new Error("Not allowed by CORS"));
@@ -74,10 +67,7 @@ app.use(
 );
 app.use(express.json({ limit: "110mb" }));
 app.use(
-  rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 200,
-  }),
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }),
 );
 
 // Health check
@@ -100,31 +90,48 @@ app.use((err, req, res, next) => {
   });
 });
 
-export const startServer = async () => {
-  await startPythonServer();
-  
-  const server = app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`API URL: http://localhost:${PORT}`);
-    startTrialReminderCron();
-  });
+let server = null;
 
-  const shutdown = () => {
-    console.log("Shutting down gracefully...");
-    stopPythonServer();
-    server.close(() => {
-      console.log("Server closed");
-      process.exit(0);
+export const startServer = async () => {
+  try {
+    await startPythonServer();
+    
+    server = app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on port ${PORT}`);
+      console.log(`API URL: http://localhost:${PORT}`);
+      startTrialReminderCron();
     });
-  };
-  process.on("SIGTERM", shutdown);
-  process.on("SIGINT", shutdown);
+
+    const gracefulShutdown = (signal) => {
+      console.log(`Received ${signal}, shutting down...`);
+      if (server) {
+        server.close(() => {
+          console.log("HTTP server closed");
+          stopPythonServer();
+          process.exit(0);
+        });
+      }
+    };
+
+    process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+    process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+  } catch (err) {
+    console.error("Failed to start server:", err);
+    process.exit(1);
+  }
 };
 
-const isDirectRun =
-  process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isDirectRun) {
   startServer();
 }
+
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled rejection:", reason);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught exception:", err);
+});
 
 export default app;
