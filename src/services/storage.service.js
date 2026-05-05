@@ -67,9 +67,14 @@ export const getDownloadUrl = async (storageUrl, expiresIn = 900) => {
   if (storageUrl.startsWith(`r2://${env.R2_BUCKET}/`)) {
     key = storageUrl.replace(`r2://${env.R2_BUCKET}/`, "");
   }
-  // Handle public R2 URLs
+  // Handle public R2 URLs (.cloudflarestorage.com)
   else if (storageUrl.includes(env.R2_PUBLIC_BASE_URL)) {
     key = storageUrl.replace(env.R2_PUBLIC_BASE_URL + "/", "");
+  }
+  // Handle R2.dev URLs
+  else if (storageUrl.includes(".r2.dev")) {
+    const url = new URL(storageUrl);
+    key = url.pathname.replace(/^\//, "");
   }
   // Handle direct bucket URLs
   else if (storageUrl.includes(`${env.R2_BUCKET}.`)) {
