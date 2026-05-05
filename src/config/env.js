@@ -6,7 +6,7 @@ dotenv.config();
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().default(3000),
-  PYTHON_ENGINE_URL: z.string().default("https://stemy-python.onrender.com"),
+  PYTHON_ENGINE_URL: z.string().default("https://stemy-backend-1.onrender.com"),
   DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(16),
   JWT_EXPIRES_IN: z.string().default("7d"),
