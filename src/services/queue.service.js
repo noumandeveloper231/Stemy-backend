@@ -75,8 +75,7 @@ if (redisConnection) {
         );
 
         // 3. Send to Python Mastering Engine API
-        const pythonApiUrl =
-          process.env.PYTHON_ENGINE_URL || "http://localhost:5050";
+        const pythonApiUrl = env.PYTHON_ENGINE_URL;
         console.log(
           "[QUICK MASTER] Sending to Python engine at:",
           pythonApiUrl,
