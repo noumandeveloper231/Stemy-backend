@@ -2,6 +2,20 @@ import { prisma } from "../lib/prisma.js";
 import { uploadBuffer, getDownloadUrl } from "../services/storage.service.js";
 import { enqueueMasteringJob } from "../services/queue.service.js";
 
+const ALLOWED_PLANS = ["BASIC", "PRO"];
+
+const checkUserPlan = async (userId) => {
+  const subscription = await prisma.subscription.findFirst({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+  });
+  
+  if (!subscription) return false;
+  
+  const isActive = ["ACTIVE", "TRIALING"].includes(subscription.status);
+  return isActive && ALLOWED_PLANS.includes(subscription.plan);
+};
+
 const ALLOWED_MIME = new Set([
   "audio/wav",
   "audio/x-wav",
@@ -15,6 +29,13 @@ const ALLOWED_MIME = new Set([
 
 export const createQuickMaster = async (req, res) => {
   try {
+    const hasValidPlan = await checkUserPlan(req.userId);
+    if (!hasValidPlan) {
+      return res.status(403).json({ 
+        message: "Quick Master requires a Basic or Pro subscription" 
+      });
+    }
+
     console.log("[QUICK MASTER] New Quick Master request received");
     console.log("[QUICK MASTER] Request user ID:", req.userId);
     console.log("[QUICK MASTER] Request body keys:", Object.keys(req.body));
