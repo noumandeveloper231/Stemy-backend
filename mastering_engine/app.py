@@ -134,6 +134,26 @@ def master():
     # ── Parse genre ──────────────────────────────────────────────────────────
     genre = (request.form.get("genre") or DEFAULT_GENRE).strip().lower()
     log.info("[QUICK MASTER] Genre: %s", genre)
+
+    # ── Parse metadata ───────────────────────────────────────────────────────
+    metadata = None
+    metadata_raw = request.form.get("metadata")
+    if metadata_raw:
+        try:
+            import json
+            metadata = json.loads(metadata_raw)
+            log.info("[QUICK MASTER] Metadata: %s", metadata)
+        except (json.JSONDecodeError, TypeError) as exc:
+            log.warning("[QUICK MASTER] Invalid metadata JSON: %s", exc)
+
+    # ── Parse cover art ──────────────────────────────────────────────────────
+    art_bytes = None
+    if "artwork" in request.files:
+        art_file = request.files["artwork"]
+        if art_file and art_file.filename:
+            art_bytes = art_file.read()
+            log.info("[QUICK MASTER] Artwork received: %s (%d bytes)",
+                     art_file.filename, len(art_bytes))
     
     try:
         preset = get_preset(genre)
@@ -173,6 +193,7 @@ def master():
             genre=genre,
             target_lufs=t_lufs,
             target_tp_db=t_tp,
+            metadata=metadata,
         )
         log.info("[QUICK MASTER] Audio processing completed. Output size: %d bytes", len(wav_bytes))
     except Exception as exc:

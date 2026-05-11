@@ -52,8 +52,9 @@ export const createQuickMaster = async (req, res) => {
         : "No file",
     );
 
-    const file = req.file;
-    const { genre, metadata } = req.body;
+    const file = req.files?.audio?.[0] || req.file;
+    const { genre, metadata: metadataRaw } = req.body;
+    const artwork = req.files?.artwork?.[0] || null;
 
     if (!file) {
       console.error("[QUICK MASTER] No file provided");
@@ -70,6 +71,21 @@ export const createQuickMaster = async (req, res) => {
     if (file.mimetype && !ALLOWED_MIME.has(file.mimetype)) {
       console.error("[QUICK MASTER] Unsupported MIME type:", file.mimetype);
       return res.status(400).json({ message: "Unsupported audio format" });
+    }
+
+    // Parse metadata and handle artwork
+    let parsedMetadata = metadataRaw ? JSON.parse(metadataRaw) : null;
+
+    // Upload artwork if provided
+    if (artwork) {
+      const artKey = `artwork/${req.userId}/${Date.now()}-${artwork.originalname}`;
+      const artUrl = await uploadBuffer({
+        key: artKey,
+        body: artwork.buffer,
+        contentType: artwork.mimetype,
+      });
+      parsedMetadata = { ...parsedMetadata, artworkUrl: artUrl };
+      console.log("[QUICK MASTER] Artwork uploaded to:", artUrl);
     }
 
     const sourceKey = `masters/${req.userId}/${Date.now()}-${file.originalname}`;
@@ -92,7 +108,7 @@ export const createQuickMaster = async (req, res) => {
         sourceMime: file.mimetype || "application/octet-stream",
         sourceSize: file.size,
         sourceUrl,
-        metadata: metadata ? JSON.parse(metadata) : null,
+        metadata: parsedMetadata,
       },
     });
     console.log("[QUICK MASTER] Database record created with ID:", master.id);

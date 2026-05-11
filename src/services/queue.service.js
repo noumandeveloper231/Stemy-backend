@@ -94,6 +94,15 @@ if (redisConnection) {
           master.sourceName,
         );
         formData.append("genre", master.genre);
+
+        // Pass metadata to Python engine
+        if (master.metadata) {
+          const metaPayload = typeof master.metadata === "string"
+            ? master.metadata
+            : JSON.stringify(master.metadata);
+          formData.append("metadata", metaPayload);
+        }
+
         console.log(
           "[QUICK MASTER] FormData prepared - file size:",
           sourceBuffer.byteLength,

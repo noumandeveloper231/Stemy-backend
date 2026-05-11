@@ -11,7 +11,10 @@ import {
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
-router.post("/quick", authMiddleware, upload.single("audio"), createQuickMaster);
+router.post("/quick", authMiddleware, upload.fields([
+  { name: "audio", maxCount: 1 },
+  { name: "artwork", maxCount: 1 },
+]), createQuickMaster);
 router.get("/", authMiddleware, listMasters);
 router.get("/:id", authMiddleware, getMasterById);
 router.get("/:id/download", authMiddleware, getMasterDownload);
