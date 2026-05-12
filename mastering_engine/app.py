@@ -4,7 +4,7 @@ app.py – Stemy Mastering Engine REST API
 Endpoints:
   POST /master
       Body     : multipart/form-data
-                   file   (required) – audio file (WAV, MP3, FLAC, M4A, OGG, AIFF …)
+                   file   (required) – audio file (WAV, AIFF, FLAC, MP3 …)
                    genre  (optional) – one of: pop, hiphop, rnb, rock, electronic,
                                        acoustic, country  (default: pop)
       Response : audio/wav – 44.1 kHz / 24-bit PCM WAV, stereo
@@ -51,8 +51,7 @@ CORS(app, resources={r"/*": {"origins": "*"}})   # allow all origins (update in 
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
 
 ALLOWED_EXTENSIONS = {
-    ".wav", ".mp3", ".flac", ".aac", ".m4a",
-    ".ogg", ".oga", ".aiff", ".aif", ".opus",
+    ".wav", ".mp3", ".flac", ".aiff", ".aif",
 }
 
 

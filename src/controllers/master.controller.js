@@ -24,7 +24,6 @@ const ALLOWED_MIME = new Set([
   "audio/mpeg",
   "audio/flac",
   "audio/x-flac",
-  "audio/mp4",
   "audio/aiff",
   "audio/x-aiff",
 ]);

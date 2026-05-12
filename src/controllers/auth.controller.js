@@ -2,6 +2,7 @@ import bcrypt from "bcrypt";
 import { OAuth2Client } from "google-auth-library";
 import { prisma } from "../lib/prisma.js";
 import { sendEmail } from "../utils/email.js";
+import { welcomeEmail, verificationOtpEmail, passwordResetOtpEmail } from "../utils/email-templates.js";
 import { createAccessToken, randomToken } from "../utils/tokens.js";
 import { env } from "../config/env.js";
 
@@ -63,13 +64,13 @@ export const signup = async (req, res) => {
     await sendEmail({
       to: email,
       subject: "Welcome to Stemy! 🎵",
-      html: `<div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;padding:24px;background:#0a0a0f;color:#e5e7eb;border-radius:12px;"><h1 style="color:#00e5a0;margin-bottom:16px;">Welcome to Stemy, ${firstName || 'artist'}!</h1><p>Thanks for joining Stemy. Your account has been created and you're ready to start mastering your music.</p><p style="margin-top:16px;">Here's what you can do right now:</p><ul><li>Upload a track and hear it mastered in under 90 seconds</li><li>Try our genre-specific mastering chains (Pop, Hip-Hop, R&B, Rock, and more)</li><li>Start your 7-day free trial — no credit card needed</li></ul><p style="margin-top:20px;">Don't forget to verify your email with the code we just sent you to unlock all features.</p><p style="margin-top:24px;color:#7fff3a;">Let's make your music sound incredible.</p><p style="margin-top:8px;font-size:14px;opacity:0.7;">— Team Stemy</p></div>`,
+      html: welcomeEmail(firstName),
     });
 
     await sendEmail({
       to: email,
-      subject: "Your Stemy verification code",
-      html: `<p>Welcome to Stemy.</p><p>Your verification code is <strong style="font-size:18px;letter-spacing:2px;">${verificationToken}</strong>.</p><p>This code expires in 10 minutes.</p>`,
+      subject: "Verify your email",
+      html: verificationOtpEmail(verificationToken),
     });
 
     return res.status(201).json(authResponse(user));
@@ -168,7 +169,7 @@ export const resendVerification = async (req, res) => {
     await sendEmail({
       to: email,
       subject: "Your Stemy verification code",
-      html: `<p>Your verification code is <strong style="font-size:18px;letter-spacing:2px;">${verificationToken}</strong>.</p><p>This code expires in 10 minutes.</p>`,
+      html: verificationOtpEmail(verificationToken, true),
     });
 
     return res.json({
@@ -199,7 +200,7 @@ export const forgotPassword = async (req, res) => {
       await sendEmail({
         to: email,
         subject: "Your Stemy password reset code",
-        html: `<p>Your password reset code is <strong style="font-size:18px;letter-spacing:2px;">${resetToken}</strong>.</p><p>This code expires in 10 minutes.</p>`,
+        html: passwordResetOtpEmail(resetToken),
       });
     }
 
@@ -248,6 +249,31 @@ export const resetPassword = async (req, res) => {
   } catch (error) {
     console.error("Reset password error:", error);
     return res.status(500).json({ message: "Failed to reset password" });
+  }
+};
+
+export const verifyResetOtp = async (req, res) => {
+  try {
+    const { otp, email } = req.body;
+    const code = String(otp || "").trim();
+    if (!code || !email) {
+      return res.status(400).json({ message: "Reset code and email are required" });
+    }
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (
+      !user ||
+      user.resetToken !== code ||
+      !user.resetTokenExpiry ||
+      user.resetTokenExpiry < new Date()
+    ) {
+      return res.status(400).json({ message: "Invalid or expired reset code" });
+    }
+
+    return res.json({ message: "OTP verified successfully" });
+  } catch (error) {
+    console.error("Verify OTP error:", error);
+    return res.status(500).json({ message: "Failed to verify OTP" });
   }
 };
 

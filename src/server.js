@@ -16,7 +16,7 @@ import { startPythonServer, stopPythonServer } from "./services/python-server.js
 assertRequiredEnvForProd();
 
 const app = express();
-const PORT = env.PORT || 3000;
+const PORT = env.PORT || 5500;
 app.set("trust proxy", 1);
 
 const allowedOriginsSet = new Set([

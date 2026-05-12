@@ -7,6 +7,7 @@ import {
   resendVerification,
   forgotPassword,
   resetPassword,
+  verifyResetOtp,
   logout,
   getMe,
 } from "../controllers/auth.controller.js";
@@ -28,6 +29,7 @@ router.post("/resend-verification", resendVerification);
 // Password reset
 router.post("/forgot-password", forgotPassword);
 router.post("/reset-password", resetPassword);
+router.post("/verify-reset-otp", verifyResetOtp);
 router.post("/logout", logout);
 
 // Get current user (protected)

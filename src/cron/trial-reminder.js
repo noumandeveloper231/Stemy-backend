@@ -1,27 +1,9 @@
 import cron from "node-cron";
 import { prisma } from "../lib/prisma.js";
 import { sendEmail } from "../utils/email.js";
+import { trialEndingEmail } from "../utils/email-templates.js";
 
 const TRAIL_END_REMINDER_DAYS = 3;
-
-const reminderEmail = (firstName, trialEndsAt) => `
-<div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;padding:24px;background:#0a0a0f;color:#e5e7eb;border-radius:12px;">
-  <h1 style="color:#f59e0b;margin-bottom:16px;">Your Stemy trial is ending soon</h1>
-  <p>Hey ${firstName || 'artist'},</p>
-  <p>Your 7-day free trial will end on <strong>${trialEndsAt.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</strong>.</p>
-  <p style="margin-top:16px;">Don't lose access to:</p>
-  <ul>
-    <li>Unlimited AI-powered mastering</li>
-    <li>Genre-specific mastering chains</li>
-    <li>High-quality 24-bit WAV downloads</li>
-  </ul>
-  <p style="margin-top:20px;">Upgrade now to keep mastering without interruption.</p>
-  <div style="margin-top:24px;">
-    <a href="${process.env.FRONTEND_URL || 'http://localhost:5500'}" style="display:inline-block;padding:12px 24px;background:#00e5a0;color:#0a0a0f;text-decoration:none;border-radius:8px;font-weight:600;">Upgrade to Pro</a>
-  </div>
-  <p style="margin-top:24px;font-size:14px;opacity:0.7;">— Team Stemy</p>
-</div>
-`;
 
 export const startTrialReminderCron = () => {
   cron.schedule("0 9 * * *", async () => {
@@ -55,7 +37,7 @@ export const startTrialReminderCron = () => {
           await sendEmail({
             to: sub.user.email,
             subject: "Your Stemy trial ends in 3 days",
-            html: reminderEmail(sub.user.firstName, sub.trialEndsAt),
+            html: trialEndingEmail(sub.user.firstName, sub.trialEndsAt, process.env.FRONTEND_URL || 'http://localhost:5500'),
           });
           console.log(`  ✓ Reminder sent to ${sub.user.email}`);
         } catch (err) {
