@@ -64,6 +64,15 @@ NORM_PASSES     = 2
 
 # ─────────────────────────── helpers ────────────────────────────────────────
 
+def _guess_image_mime(data: bytes) -> str:
+    """Detect JPEG vs PNG from magic bytes for RIFF PICT chunk."""
+    if len(data) < 4:
+        return "image/jpeg"
+    if data[:4] == b"\x89PNG":
+        return "image/png"
+    return "image/jpeg"
+
+
 def _db_to_lin(db: float) -> float:
     return 10.0 ** (db / 20.0)
 
@@ -90,52 +99,67 @@ def _ensure_stereo(audio: np.ndarray) -> np.ndarray:
 def _embed_riff_metadata(
     wav_bytes: bytes,
     metadata: dict | None = None,
+    artwork_bytes: bytes | None = None,
 ) -> bytes:
     """
-    Embed metadata as RIFF LIST/INFO chunks in a WAV byte stream.
-    This is the standard WAV metadata format recognised by Windows
-    File Explorer, VLC, foobar2000, and most media players.
+    Embed metadata as RIFF LIST/INFO chunks + optional PICT cover art block
+    in a WAV byte stream.
+    Recognised by Windows File Explorer, VLC, foobar2000, and most media players.
     """
-    if not metadata or len(wav_bytes) < 12:
+    if (not metadata and not artwork_bytes) or len(wav_bytes) < 12:
         return wav_bytes
 
     if wav_bytes[:4] != b"RIFF" or wav_bytes[8:12] != b"WAVE":
         return wav_bytes
 
     try:
-        # Build INFO sub-chunks (null-terminated strings, padded to even)
+        # ── Build LIST/INFO payload (text tags) ──────────────────────────
         info_payload = b""
-        chunk_map = {
-            "INAM": metadata.get("title"),
-            "IART": metadata.get("artist"),
-            "IPRD": metadata.get("album"),
-            "ICRD": metadata.get("year"),
-            "IGNR": metadata.get("genre"),
-            "ICOP": metadata.get("copyright"),
-            "ISRC": metadata.get("isrc"),
-        }
+        if metadata:
+            chunk_map = {
+                "INAM": metadata.get("title"),
+                "IART": metadata.get("artist"),
+                "IPRD": metadata.get("album"),
+                "ICRD": metadata.get("year"),
+                "IGNR": metadata.get("genre"),
+                "ICOP": metadata.get("copyright"),
+                "ISRC": metadata.get("isrc"),
+            }
+            for ck_id, val in chunk_map.items():
+                val_str = str(val).strip() if val else ""
+                if not val_str:
+                    continue
+                raw = val_str.encode("utf-8") + b"\x00"
+                if len(raw) % 2:
+                    raw += b"\x00"
+                info_payload += ck_id.encode() + struct.pack("<I", len(raw)) + raw
 
-        for ck_id, val in chunk_map.items():
-            val_str = str(val).strip() if val else ""
-            if not val_str:
-                continue
-            raw = val_str.encode("utf-8") + b"\x00"      # null-terminated
-            if len(raw) % 2:
-                raw += b"\x00"                             # pad to even
-            info_payload += ck_id.encode() + struct.pack("<I", len(raw)) + raw
+        chunks_to_insert = []  # (position-key, raw-chunk-bytes)
 
-        if not info_payload:
+        if info_payload:
+            list_body = b"INFO" + info_payload
+            if len(list_body) % 2:
+                list_body += b"\x00"
+            chunks_to_insert.append(("before_data", b"LIST" + struct.pack("<I", len(list_body)) + list_body))
+
+        # ── Build PICT chunk (cover art) ─────────────────────────────────
+        if artwork_bytes:
+            mime_type = _guess_image_mime(artwork_bytes)
+            # PICT chunk: 4-byte MIME hint + raw image data
+            mime_bytes = mime_type.encode("utf-8") + b"\x00"
+            if len(mime_bytes) % 2:
+                mime_bytes += b"\x00"
+            pict_data = mime_bytes + artwork_bytes
+            if len(pict_data) % 2:
+                pict_data += b"\x00"
+            chunks_to_insert.append(("before_data", b"PICT" + struct.pack("<I", len(pict_data)) + pict_data))
+
+        if not chunks_to_insert:
             return wav_bytes
 
-        # Wrap in a LIST chunk
-        list_body = b"INFO" + info_payload
-        if len(list_body) % 2:
-            list_body += b"\x00"
-        list_chunk = b"LIST" + struct.pack("<I", len(list_body)) + list_body
-
-        # Walk existing chunks and insert LIST before the data chunk
-        pos = 12   # skip "RIFF" + size + "WAVE"
-        out = bytearray(wav_bytes[:12])   # start with RIFF header (size will be patched)
+        # ── Walk existing chunks and insert new ones before "data" ──────
+        pos = 12
+        out = bytearray(wav_bytes[:12])
 
         while pos + 8 <= len(wav_bytes):
             ck_id = wav_bytes[pos:pos+4]
@@ -145,7 +169,8 @@ def _embed_riff_metadata(
                 ck_end += 1
 
             if ck_id == b"data":
-                out.extend(list_chunk)
+                for _, chunk_bytes in chunks_to_insert:
+                    out.extend(chunk_bytes)
 
             out.extend(wav_bytes[pos:ck_end])
             pos = ck_end
@@ -251,6 +276,7 @@ def master_audio(
     target_lufs: float = TARGET_LUFS,
     target_tp_db: float = TARGET_TP_DB,
     metadata: dict | None = None,
+    artwork_bytes: bytes | None = None,
 ) -> bytes:
     """
     Master an audio file and return 44.1 kHz / 24-bit WAV bytes.
@@ -261,6 +287,8 @@ def master_audio(
     genre        : genre key string (e.g. "pop", "hiphop", "rnb")
     target_lufs  : integrated LUFS target (default -14.0)
     target_tp_db : true-peak ceiling in dBTP (default -1.0)
+    metadata     : dict of text metadata fields (title, artist, etc.)
+    artwork_bytes: raw image bytes (JPEG/PNG) to embed as cover art
 
     Returns
     -------
@@ -412,8 +440,8 @@ def master_audio(
              format="WAV", subtype="PCM_24")
     wav_bytes = out_buf.getvalue()
 
-    # ── 10. Embed RIFF metadata chunks ───────────────────────────────────────
-    wav_bytes = _embed_riff_metadata(wav_bytes, metadata)
+    # ── 10. Embed RIFF metadata chunks + cover art ───────────────────────────
+    wav_bytes = _embed_riff_metadata(wav_bytes, metadata, artwork_bytes)
 
     return wav_bytes
 

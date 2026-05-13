@@ -19,7 +19,8 @@ model User {
   verificationExpiry DateTime?
   resetToken         String?
   resetTokenExpiry   DateTime?
-  plan               Plan      @default(BASIC)
+  plan                    Plan      @default(BASIC)
+  wantsConsoleEarlyAccess Boolean   @default(false)
 
   subscriptions Subscription[]
   masters        Master[]

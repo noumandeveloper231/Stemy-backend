@@ -27,6 +27,7 @@ import io
 import logging
 import os
 import time
+import urllib.request
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_file, abort
@@ -151,8 +152,21 @@ def master():
         art_file = request.files["artwork"]
         if art_file and art_file.filename:
             art_bytes = art_file.read()
-            log.info("[QUICK MASTER] Artwork received: %s (%d bytes)",
+            log.info("[QUICK MASTER] Artwork received directly: %s (%d bytes)",
                      art_file.filename, len(art_bytes))
+    
+    # Fallback: if no direct artwork but metadata has artworkUrl, fetch it
+    if art_bytes is None and metadata and metadata.get("artworkUrl"):
+        url = metadata["artworkUrl"]
+        log.info("[QUICK MASTER] Fetching artwork from URL: %s", url)
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Stemy/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                art_bytes = resp.read()
+            log.info("[QUICK MASTER] Artwork fetched from URL: %d bytes", len(art_bytes))
+        except Exception as exc:
+            log.warning("[QUICK MASTER] Failed to fetch artwork from URL: %s", exc)
+            art_bytes = None
     
     try:
         preset = get_preset(genre)
@@ -193,6 +207,7 @@ def master():
             target_lufs=t_lufs,
             target_tp_db=t_tp,
             metadata=metadata,
+            artwork_bytes=art_bytes,
         )
         log.info("[QUICK MASTER] Audio processing completed. Output size: %d bytes", len(wav_bytes))
     except Exception as exc:

@@ -37,14 +37,15 @@ router.get("/me", authMiddleware, async (req, res) => {
 // Update user profile
 router.patch("/me", authMiddleware, async (req, res) => {
   try {
-    const { displayName, firstName, lastName } = req.body;
+    const { displayName, firstName, lastName, wantsConsoleEarlyAccess } = req.body;
 
     const user = await prisma.user.update({
       where: { id: req.userId },
       data: {
-        displayName,
-        firstName,
-        lastName,
+        ...(displayName !== undefined && { displayName }),
+        ...(firstName !== undefined && { firstName }),
+        ...(lastName !== undefined && { lastName }),
+        ...(wantsConsoleEarlyAccess !== undefined && { wantsConsoleEarlyAccess }),
       },
       select: {
         id: true,
@@ -57,6 +58,7 @@ router.patch("/me", authMiddleware, async (req, res) => {
         createdAt: true,
         updatedAt: true,
         plan: true,
+        wantsConsoleEarlyAccess: true,
       },
     });
 

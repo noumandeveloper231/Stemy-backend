@@ -15,6 +15,7 @@ const safeUserSelect = {
   avatarUrl: true,
   emailVerified: true,
   plan: true,
+  wantsConsoleEarlyAccess: true,
   createdAt: true,
   updatedAt: true,
 };
