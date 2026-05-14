@@ -277,9 +277,9 @@ def master_audio(
     target_tp_db: float = TARGET_TP_DB,
     metadata: dict | None = None,
     artwork_bytes: bytes | None = None,
-) -> bytes:
+) -> tuple[bytes, float, float]:
     """
-    Master an audio file and return 44.1 kHz / 24-bit WAV bytes.
+    Master an audio file and return 44.1 kHz / 24-bit WAV bytes plus metrics.
 
     Parameters
     ----------
@@ -292,7 +292,8 @@ def master_audio(
 
     Returns
     -------
-    bytes : 24-bit PCM WAV at 44100 Hz, stereo
+    tuple[bytes, float, float] : (24-bit PCM WAV at 44100 Hz stereo,
+                                   integrated LUFS, true-peak dBTP)
     """
     if not PEDALBOARD_AVAILABLE:
         raise RuntimeError(
@@ -443,7 +444,7 @@ def master_audio(
     # ── 10. Embed RIFF metadata chunks + cover art ───────────────────────────
     wav_bytes = _embed_riff_metadata(wav_bytes, metadata, artwork_bytes)
 
-    return wav_bytes
+    return wav_bytes, final_lufs, final_tp
 
 
 # ─────────────────────────── quick self-test ────────────────────────────────
@@ -461,6 +462,6 @@ if __name__ == "__main__":
     dest = Path(sys.argv[3]) if len(sys.argv) > 3 else src.with_stem(src.stem + "_mastered")
 
     raw = src.read_bytes()
-    out = master_audio(raw, genre)
+    out, lufs, tp = master_audio(raw, genre)
     dest.write_bytes(out)
-    print(f"✓ Mastered → {dest}  ({len(out)//1024} KB)")
+    print(f"✓ Mastered → {dest}  ({len(out)//1024} KB)  LUFS={lufs:.1f}  dBTP={tp:.1f}")

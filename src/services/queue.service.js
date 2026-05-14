@@ -154,11 +154,11 @@ if (redisConnection) {
           );
         }
 
-        // Read processing metadata
+        // Read actual loudness from response headers
         const lufs =
-          parseFloat(pythonResponse.headers.get("X-Lufs-Target")) || -14;
+          parseFloat(pythonResponse.headers.get("X-Lufs-Actual")) || -14;
         const dbtp =
-          parseFloat(pythonResponse.headers.get("X-Tp-Target")) || -1;
+          parseFloat(pythonResponse.headers.get("X-Tp-Actual")) || -1;
         const processingTime = pythonResponse.headers.get(
           "X-Processing-Time-Ms",
         );

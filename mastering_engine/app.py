@@ -8,7 +8,7 @@ Endpoints:
                    genre  (optional) – one of: pop, hiphop, rnb, rock, electronic,
                                        acoustic, country  (default: pop)
       Response : audio/wav – 44.1 kHz / 24-bit PCM WAV, stereo
-                 Headers: X-Lufs-Target, X-Tp-Target, X-Genre, X-Processing-Time-Ms
+                  Headers: X-Lufs-Actual, X-Tp-Actual, X-Genre, X-Processing-Time-Ms
 
   GET /genres
       Response : JSON list of available genre keys + labels
@@ -66,7 +66,7 @@ def _cors_headers() -> dict:
     return {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Expose-Headers":
-            "X-Lufs-Target, X-Tp-Target, X-Genre, X-Processing-Time-Ms",
+            "X-Lufs-Actual, X-Tp-Actual, X-Genre, X-Processing-Time-Ms",
     }
 
 
@@ -201,7 +201,7 @@ def master():
     t_start = time.perf_counter()
     try:
         log.info("[QUICK MASTER] Starting audio processing...")
-        wav_bytes = master_audio(
+        wav_bytes, final_lufs, final_tp = master_audio(
             raw,
             genre=genre,
             target_lufs=t_lufs,
@@ -242,8 +242,8 @@ def master():
     response.headers.update({
         **_cors_headers(),
         "X-Genre":               genre,
-        "X-Lufs-Target":         str(t_lufs),
-        "X-Tp-Target":           str(t_tp),
+        "X-Lufs-Actual":         str(round(final_lufs, 2)),
+        "X-Tp-Actual":           str(round(final_tp, 2)),
         "X-Processing-Time-Ms":  str(elapsed_ms),
         "Cache-Control":         "no-store",
     })
