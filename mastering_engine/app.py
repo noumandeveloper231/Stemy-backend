@@ -267,6 +267,6 @@ def json_error(exc):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5050))
     host = os.environ.get("HOST", "127.0.0.1")
-    debug = True  # Enable debug mode
+    debug = False
     log.info("Starting Stemy Mastering Engine on %s:%d (debug=%s)", host, port, debug)
     app.run(host=host, port=port, debug=debug)

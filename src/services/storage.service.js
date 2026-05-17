@@ -56,6 +56,24 @@ export const uploadBuffer = async ({ key, body, contentType }) => {
   return toPublicUrl(key) || `r2://${env.R2_BUCKET}/${key}`;
 };
 
+export const uploadStream = async ({ key, stream, contentType, contentLength }) => {
+  if (!s3) {
+    return `local://${key}`;
+  }
+
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: env.R2_BUCKET,
+      Key: key,
+      Body: stream,
+      ContentType: contentType || "application/octet-stream",
+      ContentLength: contentLength,
+    }),
+  );
+
+  return toPublicUrl(key) || `r2://${env.R2_BUCKET}/${key}`;
+};
+
 export const getDownloadUrl = async (storageUrl, expiresIn = 900) => {
   if (storageUrl.startsWith("local://")) {
     return storageUrl;

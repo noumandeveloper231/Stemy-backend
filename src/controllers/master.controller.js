@@ -1,8 +1,9 @@
 import { prisma } from "../lib/prisma.js";
 import { uploadBuffer, getDownloadUrl } from "../services/storage.service.js";
-import { enqueueMasteringJob } from "../services/queue.service.js";
+import { enqueueMasteringJob, getLocalDownloadPath } from "../services/queue.service.js";
 import https from "https";
 import http from "http";
+import fs from "fs";
 
 const ALLOWED_PLANS = ["BASIC", "PRO"];
 
@@ -87,16 +88,6 @@ export const createQuickMaster = async (req, res) => {
       console.log("[QUICK MASTER] Artwork uploaded to:", artUrl);
     }
 
-    const sourceKey = `masters/${req.userId}/${Date.now()}-${file.originalname}`;
-    console.log("[QUICK MASTER] Uploading to storage with key:", sourceKey);
-
-    const sourceUrl = await uploadBuffer({
-      key: sourceKey,
-      body: file.buffer,
-      contentType: file.mimetype,
-    });
-    console.log("[QUICK MASTER] File uploaded successfully to:", sourceUrl);
-
     console.log("[QUICK MASTER] Creating database record...");
     const master = await prisma.master.create({
       data: {
@@ -106,14 +97,14 @@ export const createQuickMaster = async (req, res) => {
         sourceName: file.originalname,
         sourceMime: file.mimetype || "application/octet-stream",
         sourceSize: file.size,
-        sourceUrl,
+        sourceUrl: "pending",
         metadata: parsedMetadata,
       },
     });
     console.log("[QUICK MASTER] Database record created with ID:", master.id);
 
     console.log("[QUICK MASTER] Enqueuing mastering job...");
-    await enqueueMasteringJob(master.id);
+    await enqueueMasteringJob(master.id, file.buffer);
     console.log("[QUICK MASTER] Mastering job enqueued successfully");
 
     return res.status(201).json({ master });
@@ -150,23 +141,39 @@ export const getMasterDownload = async (req, res) => {
   if (!master) {
     return res.status(404).json({ message: "Master not found" });
   }
-  if (master.status !== "COMPLETE" || !master.outputUrl) {
+  if (master.status !== "COMPLETE") {
     return res.status(409).json({ message: "Master output is not ready" });
   }
 
-  // Generate signed URL for storage
+  // Check local temp cache first (fastest)
+  const localPath = getLocalDownloadPath(master.id);
+  if (localPath && fs.existsSync(localPath)) {
+    const filename = `mastered-${master.sourceName?.replace(/\.[^.]+$/, "") || "track"}.wav`;
+    res.setHeader("Content-Type", "audio/wav");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Cache-Control", "no-store");
+    const stream = fs.createReadStream(localPath);
+    stream.pipe(res);
+    stream.on("error", () => {
+      if (!res.headersSent) res.status(500).json({ message: "Failed to read file" });
+    });
+    return;
+  }
+
+  // Fall back to R2
+  if (!master.outputUrl) {
+    return res.status(409).json({ message: "Master output is still uploading, please try again in a moment" });
+  }
+
   const signedUrl = await getDownloadUrl(master.outputUrl);
   
-  // Extract filename from URL
   const urlObj = new URL(master.outputUrl);
   const filename = urlObj.pathname.split("/").pop() || "mastered-track.wav";
   
-  // Set headers for file download
   res.setHeader("Content-Type", "audio/wav");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.setHeader("Cache-Control", "no-store");
   
-  // Create proxy request to storage
   const proxyUrl = new URL(signedUrl);
   const protocol = proxyUrl.protocol === "https:" ? https : http;
   
@@ -175,8 +182,6 @@ export const getMasterDownload = async (req, res) => {
       res.status(proxyRes.statusCode || 500).json({ message: "Failed to fetch file from storage" });
       return;
     }
-    
-    // Pipe the response directly
     proxyRes.pipe(res);
   });
   

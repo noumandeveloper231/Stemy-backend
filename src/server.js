@@ -65,6 +65,8 @@ app.use(
   }),
 );
 app.use(express.json({ limit: "110mb" }));
+app.use("/api/masters", masterRoutes);
+
 app.use(
   rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }),
 );
@@ -80,7 +82,6 @@ app.get("/health", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
-app.use("/api/masters", masterRoutes);
 
 app.use((err, req, res, next) => {
   console.error(err.stack);

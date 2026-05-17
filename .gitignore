@@ -3,3 +3,8 @@ node_modules/
 coverage/
 dist/
 *.log
+tmp/
+__pycache__/
+*.pyc
+.venv/
+.cache/
