@@ -4,7 +4,7 @@ import { env } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
 import { sendEmail } from "../utils/email.js";
 import { Readable } from "stream";
-import { getDownloadUrl, uploadBuffer, uploadStream } from "./storage.service.js";
+import { getDownloadUrl, uploadBuffer } from "./storage.service.js";
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -20,7 +20,7 @@ export const masteringQueue = redisConnection
   ? new Queue("mastering", { connection: redisConnection })
   : null;
 
-// In-memory buffer cache — avoids R2 round-trip for recently uploaded files
+// Buffer cache — keeps source in memory so first attempt avoids R2 round-trip
 const bufferCache = new Map();
 
 // Download cache — maps masterId to local temp file path for fast serving
@@ -56,29 +56,22 @@ if (redisConnection) {
         if (srcBuf) bufferCache.delete(masterId);
 
         if (!srcBuf) {
-          const sourceDownloadUrl = await getDownloadUrl(master.sourceUrl);
-          marks.push(T("signed_url"));
-          const sourceResponse = await fetch(sourceDownloadUrl);
-          if (!sourceResponse.ok) throw new Error("Failed to download source audio");
-          srcBuf = await sourceResponse.arrayBuffer();
+          if (master.sourceUrl.startsWith("local://")) {
+            const localPath = master.sourceUrl.slice("local://".length);
+            const fileBuf = fs.readFileSync(localPath);
+            srcBuf = fileBuf.buffer.slice(fileBuf.byteOffset, fileBuf.byteOffset + fileBuf.byteLength);
+          } else {
+            const sourceDownloadUrl = await getDownloadUrl(master.sourceUrl);
+            marks.push(T("signed_url"));
+            const sourceResponse = await fetch(sourceDownloadUrl);
+            if (!sourceResponse.ok) throw new Error("Failed to download source audio");
+            srcBuf = await sourceResponse.arrayBuffer();
+          }
         }
         marks.push(T("get_src"));
 
         if (srcBuf.byteLength > 150 * 1024 * 1024)
           throw new Error("File too large. Maximum size is 150MB");
-
-        // ── Upload source to R2 for persistence ────────────────
-        const sourceKey = `masters/${master.userId}/${Date.now()}-${master.sourceName}`;
-        const realSourceUrl = await uploadBuffer({
-          key: sourceKey,
-          body: Buffer.from(srcBuf),
-          contentType: master.sourceMime,
-        });
-        await prisma.master.update({
-          where: { id: masterId },
-          data: { sourceUrl: realSourceUrl },
-        });
-        marks.push(T("upload_src"));
 
         // ── Send to Python Mastering Engine ────────────────────
         const formData = new FormData();
@@ -144,8 +137,26 @@ if (redisConnection) {
         });
         marks.push(T("db_update"));
 
-        // ── Upload to R2 in background (don't await) ───────────
-        const outputUrlPromise = (async () => {
+        // ── Upload source + output to R2 in background (don't await) ──
+        const r2UploadPromise = (async () => {
+          // Upload source to R2 for persistence
+          if (master.sourceUrl.startsWith("local://")) {
+            const localPath = master.sourceUrl.slice("local://".length);
+            const sourceBuf = fs.readFileSync(localPath);
+            const sourceKey = `masters/${master.userId}/${Date.now()}-${master.sourceName}`;
+            const realSourceUrl = await uploadBuffer({
+              key: sourceKey,
+              body: sourceBuf,
+              contentType: master.sourceMime,
+            });
+            await prisma.master.update({
+              where: { id: masterId },
+              data: { sourceUrl: realSourceUrl },
+            });
+            fs.unlink(localPath, () => {});
+          }
+
+          // Upload output to R2
           const fileBuf = fs.readFileSync(tmpPath);
           const result = await uploadBuffer({
             key: outputKey,
@@ -156,6 +167,7 @@ if (redisConnection) {
             where: { id: masterId },
             data: { outputUrl: result },
           });
+
           // Keep temp file for 5 min, then clean up
           setTimeout(() => {
             downloadCache.delete(masterId);
@@ -179,14 +191,13 @@ if (redisConnection) {
         const outMB = outputLength ? (outputLength / 1024 / 1024).toFixed(1) : "?";
         console.log(`\n═══ MASTER TIMINGS ═══`);
         console.log(`  Get source     ${fmt(marks[0], marks[1])}  (${srcMB} MB)`);
-        console.log(`  Upload src R2  ${fmt(marks[1], marks[2])}`);
-        console.log(`  Python engine  ${fmt(marks[2], marks[3])}  (py=${(parseInt(pyTime||0)/1000).toFixed(1)}s)`);
-        console.log(`  Write local    ${fmt(marks[3], marks[4])}  (${outMB} MB)`);
-        console.log(`  DB update      ${fmt(marks[4], marks[5])}`);
+        console.log(`  Python engine  ${fmt(marks[1], marks[2])}  (py=${(parseInt(pyTime||0)/1000).toFixed(1)}s)`);
+        console.log(`  Write local    ${fmt(marks[2], marks[3])}  (${outMB} MB)`);
+        console.log(`  DB update      ${fmt(marks[3], marks[4])}`);
         console.log(`  ─────────────────────────────`);
-        console.log(`  USER READY     ${fmt(marks[0], marks[5])}`);
+        console.log(`  USER READY     ${fmt(marks[0], marks[4])}`);
         console.log(`  ─────────────────────────────`);
-        console.log(`  R2 upload runs in background (avg ~${Math.round((outputLength||0) / 1024 / 1024 / 2)}s for ${outMB} MB)`);
+        console.log(`  R2 upload runs in background`);
         console.log(`═══════════════════════════════\n`);
       } catch (error) {
         console.error(`Mastering Job Failed for ${masterId}:`, error);
