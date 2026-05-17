@@ -56,17 +56,11 @@ if (redisConnection) {
         if (srcBuf) bufferCache.delete(masterId);
 
         if (!srcBuf) {
-          if (master.sourceUrl.startsWith("local://")) {
-            const localPath = master.sourceUrl.slice("local://".length);
-            const fileBuf = fs.readFileSync(localPath);
-            srcBuf = fileBuf.buffer.slice(fileBuf.byteOffset, fileBuf.byteOffset + fileBuf.byteLength);
-          } else {
-            const sourceDownloadUrl = await getDownloadUrl(master.sourceUrl);
-            marks.push(T("signed_url"));
-            const sourceResponse = await fetch(sourceDownloadUrl);
-            if (!sourceResponse.ok) throw new Error("Failed to download source audio");
-            srcBuf = await sourceResponse.arrayBuffer();
-          }
+          const sourceDownloadUrl = await getDownloadUrl(master.sourceUrl);
+          marks.push(T("signed_url"));
+          const sourceResponse = await fetch(sourceDownloadUrl);
+          if (!sourceResponse.ok) throw new Error("Failed to download source audio");
+          srcBuf = await sourceResponse.arrayBuffer();
         }
         marks.push(T("get_src"));
 
@@ -137,26 +131,8 @@ if (redisConnection) {
         });
         marks.push(T("db_update"));
 
-        // ── Upload source + output to R2 in background (don't await) ──
-        const r2UploadPromise = (async () => {
-          // Upload source to R2 for persistence
-          if (master.sourceUrl.startsWith("local://")) {
-            const localPath = master.sourceUrl.slice("local://".length);
-            const sourceBuf = fs.readFileSync(localPath);
-            const sourceKey = `masters/${master.userId}/${Date.now()}-${master.sourceName}`;
-            const realSourceUrl = await uploadBuffer({
-              key: sourceKey,
-              body: sourceBuf,
-              contentType: master.sourceMime,
-            });
-            await prisma.master.update({
-              where: { id: masterId },
-              data: { sourceUrl: realSourceUrl },
-            });
-            fs.unlink(localPath, () => {});
-          }
-
-          // Upload output to R2
+        // ── Upload output to R2 in background (don't await) ──────────
+        const outputUrlPromise = (async () => {
           const fileBuf = fs.readFileSync(tmpPath);
           const result = await uploadBuffer({
             key: outputKey,

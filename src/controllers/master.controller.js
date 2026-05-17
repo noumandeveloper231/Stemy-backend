@@ -4,11 +4,6 @@ import { enqueueMasteringJob, getLocalDownloadPath } from "../services/queue.ser
 import https from "https";
 import http from "http";
 import fs from "fs";
-import path from "path";
-import os from "os";
-
-const TMP_DIR = path.join(os.tmpdir(), "stemy-masters");
-if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
 
 const ALLOWED_PLANS = ["BASIC", "PRO"];
 
@@ -93,11 +88,14 @@ export const createQuickMaster = async (req, res) => {
       console.log("[QUICK MASTER] Artwork uploaded to:", artUrl);
     }
 
-    console.log("[QUICK MASTER] Saving source to local temp file...");
-    const tmpSourcePath = path.join(TMP_DIR, `${Date.now()}-${file.originalname}`);
-    fs.writeFileSync(tmpSourcePath, file.buffer);
-    const sourceUrl = `local://${tmpSourcePath}`;
-    console.log("[QUICK MASTER] Source saved to:", sourceUrl);
+    console.log("[QUICK MASTER] Uploading source to storage...");
+    const sourceKey = `masters/${req.userId}/${Date.now()}-${file.originalname}`;
+    const sourceUrl = await uploadBuffer({
+      key: sourceKey,
+      body: file.buffer,
+      contentType: file.mimetype || "application/octet-stream",
+    });
+    console.log("[QUICK MASTER] Source uploaded to:", sourceUrl);
 
     console.log("[QUICK MASTER] Creating database record...");
     const master = await prisma.master.create({
