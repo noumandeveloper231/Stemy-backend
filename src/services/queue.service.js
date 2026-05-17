@@ -89,7 +89,7 @@ if (redisConnection) {
         }
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 300000);
+        const timeoutId = setTimeout(() => controller.abort(), 600000);
         let pythonResponse;
         try {
           pythonResponse = await fetch(`${env.PYTHON_ENGINE_URL}/master`, {
@@ -98,7 +98,7 @@ if (redisConnection) {
         } catch (fetchError) {
           clearTimeout(timeoutId);
           throw new Error(fetchError.name === "AbortError"
-            ? "Python engine request timed out after 5 minutes"
+            ? "Python engine request timed out after 10 minutes"
             : `Cannot connect to Python engine: ${fetchError.message}`);
         }
         clearTimeout(timeoutId);
