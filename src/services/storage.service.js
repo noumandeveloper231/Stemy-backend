@@ -53,7 +53,15 @@ export const uploadBuffer = async ({ key, body, contentType }) => {
     }),
   );
 
-  return toPublicUrl(key) || `r2://${env.R2_BUCKET}/${key}`;
+  const publicUrl = toPublicUrl(key);
+  if (publicUrl) return publicUrl;
+
+  // Fallback: construct R2 public URL manually
+  if (env.R2_PUBLIC_BASE_URL) {
+    return `${env.R2_PUBLIC_BASE_URL.replace(/\/+$/, "")}/${key.replace(/^\/+/, "")}`;
+  }
+
+  return `r2://${env.R2_BUCKET}/${key}`;
 };
 
 export const uploadStream = async ({ key, stream, contentType, contentLength }) => {

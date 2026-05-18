@@ -1,12 +1,35 @@
 import express from "express";
 import bcrypt from "bcrypt";
 import multer from "multer";
+import path from "path";
+import fs from "fs";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { prisma } from "../lib/prisma.js";
 import { uploadBuffer } from "../services/storage.service.js";
+import { env } from "../config/env.js";
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
+
+const LOCAL_AVATARS_DIR = path.join(process.cwd(), "uploads", "avatars");
+
+// Serve local avatar files
+router.get("/me/avatar/:userId/:fileName", async (req, res) => {
+  try {
+    const filePath = path.join(LOCAL_AVATARS_DIR, req.params.userId, req.params.fileName);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ message: "Avatar not found" });
+    }
+    const ext = path.extname(req.params.fileName).toLowerCase();
+    const mimeTypes = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif" };
+    res.setHeader("Content-Type", mimeTypes[ext] || "image/jpeg");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.sendFile(filePath);
+  } catch (err) {
+    console.error("[AVATAR] Serve error:", err);
+    res.status(500).json({ message: "Failed to serve avatar" });
+  }
+});
 
 // Get current user profile
 router.get("/me", authMiddleware, async (req, res) => {
@@ -24,6 +47,7 @@ router.get("/me", authMiddleware, async (req, res) => {
         createdAt: true,
         updatedAt: true,
         plan: true,
+        wantsConsoleEarlyAccess: true,
       },
     });
 
@@ -82,7 +106,6 @@ router.put("/password", authMiddleware, async (req, res) => {
       return res.status(400).json({ message: "New password must be at least 6 characters" });
     }
 
-    // Get user with password
     const user = await prisma.user.findUnique({
       where: { id: req.userId },
     });
@@ -91,13 +114,11 @@ router.put("/password", authMiddleware, async (req, res) => {
       return res.status(400).json({ message: "Cannot change password without existing credential password" });
     }
 
-    // Verify current password
     const isMatch = await bcrypt.compare(currentPassword, user.password);
     if (!isMatch) {
       return res.status(400).json({ message: "Current password is incorrect" });
     }
 
-    // Hash new password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
     await prisma.user.update({
@@ -112,6 +133,7 @@ router.put("/password", authMiddleware, async (req, res) => {
   }
 });
 
+// Upload avatar
 router.post("/me/avatar", authMiddleware, upload.single("avatar"), async (req, res) => {
   try {
     if (!req.file) {
@@ -127,17 +149,34 @@ router.post("/me/avatar", authMiddleware, upload.single("avatar"), async (req, r
       .replace(/_{2,}/g, "_");
 
     const key = `avatars/${req.userId}/${Date.now()}-${safeName}`;
-    const avatarUrl = await uploadBuffer({
+    console.log("[AVATAR] Uploading:", key, "type:", req.file.mimetype, "size:", req.file.buffer.length);
+
+    let avatarUrl = await uploadBuffer({
       key,
       body: req.file.buffer,
       contentType: req.file.mimetype,
     });
+
+    console.log("[AVATAR] uploadBuffer returned:", avatarUrl);
+
+    // Fallback: if uploadBuffer returned null/undefined/falsy, save locally
+    if (!avatarUrl) {
+      console.warn("[AVATAR] uploadBuffer returned falsy, falling back to local disk");
+      const userDir = path.join(LOCAL_AVATARS_DIR, req.userId);
+      if (!fs.existsSync(userDir)) fs.mkdirSync(userDir, { recursive: true });
+      const fileName = path.basename(key);
+      const filePath = path.join(userDir, fileName);
+      fs.writeFileSync(filePath, req.file.buffer);
+      avatarUrl = `${env.FRONTEND_URL || "http://localhost:5500"}/api/users/me/avatar/${req.userId}/${fileName}`;
+      console.log("[AVATAR] Local fallback URL:", avatarUrl);
+    }
 
     const user = await prisma.user.update({
       where: { id: req.userId },
       data: { avatarUrl },
       select: { id: true, avatarUrl: true },
     });
+    console.log("[AVATAR] DB updated, user.avatarUrl:", user.avatarUrl);
     return res.json({ message: "Avatar uploaded", user });
   } catch (error) {
     console.error("Avatar upload error:", error);

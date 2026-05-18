@@ -174,6 +174,28 @@ export const getMasterDownload = async (req, res) => {
     return res.status(409).json({ message: "Master output is still uploading, please try again in a moment" });
   }
 
+  // Handle local:// URLs — serve from disk if file exists
+  if (master.outputUrl.startsWith("local://")) {
+    const localKey = master.outputUrl.replace("local://", "");
+    const os = await import("os");
+    const pathLib = await import("path");
+    const tmpDir = pathLib.join(os.tmpdir(), "stemy-masters");
+    const diskPath = pathLib.join(tmpDir, pathLib.basename(localKey));
+    if (fs.existsSync(diskPath)) {
+      const filename = `mastered-${master.sourceName?.replace(/\.[^.]+$/, "") || "track"}.wav`;
+      res.setHeader("Content-Type", "audio/wav");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Cache-Control", "no-store");
+      const stream = fs.createReadStream(diskPath);
+      stream.pipe(res);
+      stream.on("error", () => {
+        if (!res.headersSent) res.status(500).json({ message: "Failed to read file" });
+      });
+      return;
+    }
+    return res.status(404).json({ message: "Master file not found on disk. It may have been cleaned up." });
+  }
+
   const signedUrl = await getDownloadUrl(master.outputUrl);
   
   const urlObj = new URL(master.outputUrl);
