@@ -384,6 +384,12 @@ export const googleCallback = async (req, res) => {
         },
         select: safeUserSelect,
       });
+
+      await sendEmail({
+        to: email,
+        subject: "Welcome to Stemy! 🎵",
+        html: welcomeEmail(profile?.givenName || profile?.name),
+      });
     } else if (!user.emailVerified) {
       user = await prisma.user.update({
         where: { id: user.id },
