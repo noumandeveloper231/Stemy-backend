@@ -1,242 +1,197 @@
-# Stemy — Audio Mastering Engine
+# Stemy Mastering Engine
 
-Server-side DSP mastering backend built with **Python**, **pedalboard** (Spotify), **pyloudnorm**, and **Flask**.
+Professional audio mastering DSP chain for the Stemy web application.
+
+## Overview
+
+This module provides server-side audio mastering using genre-specific presets. It's designed to be modular and testable for handoff to a DSP audio engineer.
 
 ## Architecture
 
-```
-stemy-frontend (HTML/JS)         Node.js (Express)            Python Flask
-     │                                │                           │
-     │  POST /api/masters/quick       │                           │
-     │  (FormData: file + genre)      │                           │
-     ├───────────────────────────────>│                           │
-     │                                │  BullMQ job queue         │
-     │                                │  ───────────────────      │
-     │                                │                           │
-     │                                │  POST /master             │
-     │                                │  (FormData: file + genre) │
-     │                                ├──────────────────────────>│
-     │                                │                           │
-     │                                │  ← audio/wav + headers    │
-     │                                │    X-Lufs-Actual          │
-     │                                │    X-Tp-Actual            │
-     │                                │    X-Genre                │
-     │                                │                           │
-     │  ← { master } with lufs/dbtp   │                           │
-     │<───────────────────────────────│                           │
-```
-
-## DSP Chain
+### DSP Chain (Processing Order)
 
 ```
-Input audio
-   │
-   ▼
- ① High-Pass Filter       (removes sub-sonic rumble / DC offset)
-   │
-   ▼
- ② 4-Band EQ
-   ├─ Low Shelf           (bass weight)
-   ├─ Mid-Dip Peaking     (mud & boxiness removal)
-   ├─ Presence Peaking    (vocal/instrument clarity)
-   └─ Air High Shelf      (top-end sparkle)
-   │
-   ▼
- ③ Saturation             (soft-clip harmonic warmth — cubic + tanh)
-   │
-   ▼
- ④ Bus Compressor         (dynamics glue)
-   │
-   ▼
- ⑤ Stereo Widener         (Mid/Side width expansion)
-   │
-   ▼
- ⑥ LUFS Normalisation     (iterative gain → limiter passes)
-   │
-   ▼
- ⑦ Brickwall Limiter      (true-peak ceiling at -1 dBTP)
-   │
-   ▼
-Output: 44 100 Hz · 24-bit PCM WAV · -14 LUFS · -1 dBTP
+Input → High-Pass Filter → 4-Band EQ → Tube Saturation → Bus Compressor → Stereo Widener → Brickwall Limiter → LUFS Normalisation → Output
 ```
 
-## Genre Presets
+1. **High-Pass Filter** - Removes sub-sonic rumble (30Hz default)
+2. **4-Band EQ** - LowShelf, MidDip, Presence, AirShelf
+3. **Tube Saturation** - Soft-clip harmonic warmth
+4. **Bus Compressor** - Glue / dynamics control
+5. **Stereo Widener** - Mid/Side width expansion
+6. **Brickwall Limiter** - True-peak ceiling (-1 dBTP)
+7. **LUFS Normalisation** - Integrated target (-14 LUFS)
 
-Each genre lives in its own file under `presets/` so the engineer can swap
-one out without affecting the others.
-
-| File                     | Key          | Label       | Character                              |
-|:-------------------------|:-------------|:------------|:---------------------------------------|
-| `presets/pop.py`         | `pop`        | Pop         | Vocal-forward, bright, wide            |
-| `presets/hiphop.py`      | `hiphop`     | Hip-Hop     | Sub-heavy, dark, tight stereo          |
-| `presets/rnb.py`         | `rnb`        | R&B         | Silky highs, smooth comp, wide         |
-| `presets/rock.py`        | `rock`       | Rock        | Tape grit, punchy mids, guitar bite    |
-| `presets/electronic.py`  | `electronic` | Electronic  | Maximum sub + width, club loudness     |
-| `presets/acoustic.py`    | `acoustic`   | Acoustic    | Natural, transparent, gentle comp      |
-| `presets/country.py`     | `country`    | Country     | Nashville warmth, pick attack, bright  |
-| `presets/trap.py`        | `trap`       | Trap        | Heavy 808 sub, aggressive comp, bright |
-
-### Adding or modifying a preset
-
-1. Create a new file `presets/<key>.py` (or edit an existing one).
-2. Each file exports a single dict constant (same name as the key, uppercase).
-3. The dict must contain: `label`, `hpf_hz`, `low_shelf`, `mid_dip`, `presence`,
-   `air_shelf`, `saturation_drive`, `comp`, `width`, `limiter`,
-   `target_lufs`, `target_tp_db`.
-4. Register the import in `presets/__init__.py` and add it to the `GENRES` dict.
-5. The frontend genre selector buttons are in each page's `qmx-genres` div.
-   Add a new `<button class="qmx-genre" data-g="<key>">` following the
-   existing pattern.
-
-### Configurable parameters per preset
-
-| Parameter          | Type   | Description                                   |
-|:-------------------|:-------|:----------------------------------------------|
-| `hpf_hz`           | float  | High-pass filter cutoff (Hz)                  |
-| `low_shelf`        | dict   | `freq_hz`, `gain_db`                          |
-| `mid_dip`          | dict   | `freq_hz`, `q`, `gain_db`                     |
-| `presence`         | dict   | `freq_hz`, `q`, `gain_db`                     |
-| `air_shelf`        | dict   | `freq_hz`, `gain_db`                          |
-| `saturation_drive` | float  | Drive 0.0–1.0 (0.0 = bypass)                  |
-| `comp`             | dict   | `threshold_db`, `ratio`, `attack_ms`, `release_ms`, `knee_db`, `makeup_db` |
-| `width`            | float  | Mid/Side width factor (1.0 = no change)       |
-| `limiter`          | dict   | `threshold_db`, `release_ms`                  |
-| `target_lufs`      | float  | Integrated LUFS target (e.g. -14.0)           |
-| `target_tp_db`     | float  | True-peak ceiling in dBTP (e.g. -1.0)         |
-
-These live **in the preset file**, not hardcoded in the DSP chain.
-
-## API Endpoints
-
-### `POST /master`
-Masters an uploaded audio file.
-
-**Request** — `multipart/form-data`
-| Field     | Required | Description                                      |
-|:----------|:---------|:-------------------------------------------------|
-| `file`    | ✅       | Audio file (WAV, MP3, FLAC, AIFF)               |
-| `genre`   | ❌       | Genre preset key (default: `pop`)                |
-| `metadata`| ❌       | JSON string with title, artist, album, year, etc.|
-| `artwork` | ❌       | Cover art image file (JPEG/PNG)                  |
-
-**Response** — `audio/wav` (44.1 kHz / 24-bit / stereo)
-
-**Response Headers**
-| Header                   | Description                          |
-|:-------------------------|:-------------------------------------|
-| `X-Genre`                | Applied genre key                    |
-| `X-Lufs-Actual`          | Measured integrated LUFS             |
-| `X-Tp-Actual`            | Measured true-peak (dBTP)            |
-| `X-Processing-Time-Ms`   | Server-side processing time (ms)     |
-
-**Example with cURL**
-```bash
-curl -X POST http://localhost:5050/master \
-  -F "file=@my_mix.wav" \
-  -F "genre=hiphop" \
-  --output my_mix_mastered.wav
-```
-
-### `GET /genres`
-Returns all available genre keys and labels.
-```json
-[
-  {"key": "pop",        "label": "Pop"},
-  {"key": "hiphop",     "label": "Hip-Hop"},
-  {"key": "rnb",        "label": "R&B"},
-  {"key": "rock",       "label": "Rock"},
-  {"key": "electronic", "label": "Electronic"},
-  {"key": "acoustic",   "label": "Acoustic"},
-  {"key": "country",    "label": "Country"},
-  {"key": "trap",       "label": "Trap"}
-]
-```
-
-### `GET /health`
-```json
-{"status": "ok", "service": "stemy-mastering-engine"}
-```
-
----
-
-## Frontend Integration
-
-The frontend communicates with this engine via the Node.js backend, never
-directly. The flow is:
-
-1. User uploads audio + selects genre in `mastering.html`
-2. `main.js` sends `POST /api/masters/quick` with `FormData { audio, genre, metadata }`
-3. Node.js stores the file in Cloudflare R2 and enqueues a BullMQ job
-4. The job downloads the file from R2 and forwards it to this Python engine
-   via `POST /master` with `FormData { file, genre, metadata }`
-5. The engine returns mastered WAV + `X-Lufs-Actual` / `X-Tp-Actual` headers
-6. Node.js uploads the result to R2 and stores metrics in the database
-7. Frontend polls for completion and displays the metrics
-
-### Stable API contract
-
-The boundary between frontend and backend is the `POST /master` endpoint.
-Changes to DSP internals (EQ curves, compressor settings, new presets) do
-**not** require frontend changes as long as:
-- The genre key string stays the same
-- The response format (WAV + `X-Lufs-Actual` / `X-Tp-Actual` headers) stays the same
-
-## Setup & Running
-
-### 1. Install dependencies
-```bash
-cd mastering_engine
-python -m venv .venv
-source .venv/bin/activate       # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-### 2. Development server
-```bash
-python app.py
-# → http://localhost:5050
-```
-
-### 3. Production server (Gunicorn)
-```bash
-gunicorn -c gunicorn.conf.py app:app
-```
-
-### 4. Test the CLI directly (no API)
-```bash
-python dsp_chain.py my_mix.wav hiphop my_mix_mastered.wav
-```
-This runs the same DSP chain without needing Flask or the web UI.
-Supports all genres. See `python dsp_chain.py --help` (or the source).
-
-## Output Specification
-| Property        | Value                   |
-|:----------------|:------------------------|
-| Sample rate     | 44 100 Hz               |
-| Bit depth       | 24-bit PCM              |
-| Channels        | Stereo                  |
-| Integrated LUFS | −14.0 LUFS (streaming)  |
-| True peak       | −1.0 dBTP               |
-| Format          | WAV (`.wav`)            |
-
-## Project Layout
+### Files
 
 ```
 mastering_engine/
-├── app.py              — Flask REST API (routes, validation, CORS)
-├── dsp_chain.py        — Core DSP chain (Pedalboard, saturation, limiter, normalisation)
-├── genres.py           — Loads all presets from presets/ package
-├── presets/
-│   ├── __init__.py     — GENRES dict, get_preset(), DEFAULT_GENRE
-│   ├── pop.py          — Pop preset
-│   ├── hiphop.py       — Hip-Hop preset
-│   ├── rnb.py          — R&B preset
-│   ├── rock.py         — Rock preset
-│   ├── electronic.py   — Electronic preset
-│   ├── acoustic.py     — Acoustic preset
-│   ├── country.py      — Country preset
-│   └── trap.py         — Trap preset
-├── gunicorn.conf.py    — Production WSGI config
-├── requirements.txt    — Python dependencies
-└── README.md           — This file
+├── README.md              # This file
+├── app.py                 # Flask REST API server
+├── dsp_chain.py           # Core DSP processing logic
+├── genres.py              # Genre preset loader
+├── ab_test.py             # A/B testing hooks
+└── presets/               # Individual genre presets
+    ├── __init__.py        # Preset registry
+    ├── pop.py
+    ├── hiphop.py
+    ├── rnb.py
+    ├── rock.py
+    ├── electronic.py
+    ├── acoustic.py
+    ├── country.py
+    └── trap.py
+```
+
+## For the DSP Engineer
+
+### Adding a New Preset
+
+1. Create a new file in `presets/` (e.g., `presets/jazz.py`)
+2. Define a preset dict with the parameter structure below
+3. Import and register in `presets/__init__.py`
+
+### Preset Parameter Structure
+
+Each genre preset is a dict with these keys:
+
+```python
+{
+    "label": "Genre Name",           # Display name for UI
+    "hpf_hz": 30.0,                 # High-pass filter cutoff (Hz)
+    "low_shelf": {                  # Low shelf EQ
+        "freq_hz": 110.0,           # Cutoff frequency
+        "gain_db": 2.5,             # Boost/cut in dB
+    },
+    "mid_dip": {                    # Mid range dip/boost
+        "freq_hz": 350.0,
+        "q": 0.9,                   # Q factor (bandwidth)
+        "gain_db": -2.0,
+    },
+    "presence": {                  # Upper mid presence
+        "freq_hz": 3500.0,
+        "q": 0.7,
+        "gain_db": 4.0,
+    },
+    "air_shelf": {                 # High frequency air
+        "freq_hz": 12000.0,
+        "gain_db": 4.5,
+    },
+    "saturation_drive": 0.18,      # 0.0-1.0, soft-clip drive amount
+    "comp": {                      # Bus compressor settings
+        "threshold_db": -20.0,      # Compression threshold
+        "ratio": 2.6,               # Compression ratio
+        "attack_ms": 5.0,           # Attack time (ms)
+        "release_ms": 140.0,        # Release time (ms)
+        "knee_db": 8.0,             # Knee softness
+        "makeup_db": 2.0,           # Makeup gain
+    },
+    "width": 1.85,                 # Stereo width (1.0 = mono, 2.0 = max)
+    "limiter": {                   # Brickwall limiter
+        "threshold_db": -1.0,
+        "release_ms": 60.0,
+    },
+    "target_lufs": -14.0,          # Target integrated loudness
+    "target_tp_db": -1.0,          # Target true-peak ceiling
+}
+```
+
+### Tuning Guidelines
+
+- **Saturation**: 0.05-0.4 for mastering use. Higher values add more harmonic color.
+- **Compressor**: Start with ratio 2-4, threshold around -18 to -24 dB.
+- **Stereo Width**: 1.0-2.0. Values >1.5 add significant widening.
+- **Limiter**: Keep threshold at -1 dB or lower for streaming compliance.
+
+### Running Tests
+
+```bash
+# Generate test signal and run all genres
+python ab_test.py test_sweep
+
+# Compare a specific genre against itself (for before/after testing)
+python ab_test.py compare pop
+
+# Save a reference master for regression testing
+python ab_test.py save_ref pop
+
+# Check current output against saved reference
+python ab_test.py check_ref pop
+```
+
+### A/B Testing Workflow
+
+1. **Before making changes**: Save a reference master
+   ```bash
+   python ab_test.py save_ref pop
+   ```
+
+2. **Make your preset changes** in the preset file
+
+3. **After changes**: Compare against reference
+   ```bash
+   python ab_test.py check_ref pop
+   ```
+
+4. **Review output**:
+   - LUFS difference should be < 0.5 LU
+   - dBTP difference should be < 0.1 dB
+   - DR (dynamic range) difference should be < 2 dB
+
+### API Endpoints
+
+The REST API runs on port 5050:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check |
+| `/genres` | GET | List available genres |
+| `/master` | POST | Process audio file |
+
+**Master endpoint**:
+```
+POST /master
+  Content-Type: multipart/form-data
+  file: <audio file>
+  genre: <genre key>
+
+Response: audio/wav with headers:
+  X-Lufs-Actual: LUFS value
+  X-Tp-Actual: dBTP value
+  X-DR-Actual: dynamic range
+  X-Duration-Actual: duration in seconds
+```
+
+### Frontend Integration
+
+The API is designed to be stable. The frontend expects:
+- `audio/wav` response with file download
+- LUFS/dBTP/DR values in response headers
+
+When the DSP engineer modifies preset values, the API interface remains unchanged—the frontend simply receives masters with different characteristics.
+
+## Requirements
+
+```
+pip install -r requirements.txt
+```
+
+Key dependencies:
+- `pedalboard` - Audio processing plugins
+- `pyloudnorm` - LUFS measurement (BS.1770-3)
+- `soundfile` - Audio file I/O
+- `flask` - REST API server
+- `numpy` - Signal processing
+
+## Development
+
+```bash
+# Run local server
+python app.py
+
+# Run production server
+gunicorn -w 2 -b 0.0.0.0:5050 app:app
+
+# Test a single file
+python dsp_chain.py input.wav pop output.wav
 ```

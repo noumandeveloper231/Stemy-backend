@@ -62,17 +62,25 @@ export const signup = async (req, res) => {
       select: safeUserSelect,
     });
 
-    await sendEmail({
-      to: email,
-      subject: "Welcome to Stemy! 🎵",
-      html: welcomeEmail(firstName),
-    });
+    try {
+      await sendEmail({
+        to: email,
+        subject: "Welcome to Stemy! 🎵",
+        html: welcomeEmail(firstName),
+      });
+    } catch (emailErr) {
+      console.error("Failed to send welcome email:", emailErr.message);
+    }
 
-    await sendEmail({
-      to: email,
-      subject: "Verify your email",
-      html: verificationOtpEmail(verificationToken),
-    });
+    try {
+      await sendEmail({
+        to: email,
+        subject: "Verify your email",
+        html: verificationOtpEmail(verificationToken),
+      });
+    } catch (emailErr) {
+      console.error("Failed to send verification email:", emailErr.message);
+    }
 
     return res.status(201).json(authResponse(user));
   } catch (error) {
@@ -385,11 +393,15 @@ export const googleCallback = async (req, res) => {
         select: safeUserSelect,
       });
 
-      await sendEmail({
-        to: email,
-        subject: "Welcome to Stemy! 🎵",
-        html: welcomeEmail(profile?.givenName || profile?.name),
-      });
+      try {
+        await sendEmail({
+          to: email,
+          subject: "Welcome to Stemy! 🎵",
+          html: welcomeEmail(profile?.givenName || profile?.name),
+        });
+      } catch (emailErr) {
+        console.error("Failed to send welcome email:", emailErr.message);
+      }
     } else if (!user.emailVerified) {
       user = await prisma.user.update({
         where: { id: user.id },

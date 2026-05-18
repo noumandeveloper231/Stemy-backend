@@ -42,6 +42,7 @@ try:
         HighShelfFilter,
         Compressor,
         Limiter,
+        Resample,
     )
     PEDALBOARD_AVAILABLE = True
 except ImportError as e:
@@ -200,6 +201,19 @@ def _lufs(audio: np.ndarray, sr: int) -> float:
     return meter.integrated_loudness(audio.astype(np.float64))
 
 
+def _dynamic_range(audio: np.ndarray) -> float:
+    """
+    Dynamic range in dB (difference between peak and RMS floor).
+    Simple measurement: peak dB - RMS dB.
+    """
+    rms = np.sqrt(np.mean(audio ** 2))
+    if rms < 1e-6:
+        return 0.0
+    rms_db = 20 * np.log10(rms)
+    peak_db = _true_peak_db(audio)
+    return max(0, peak_db - rms_db)
+
+
 # ─────────────────────────── Mid/Side widener ───────────────────────────────
 
 def _ms_widen(audio: np.ndarray, width: float) -> np.ndarray:
@@ -279,9 +293,9 @@ def master_audio(
     target_tp_db: float = TARGET_TP_DB,
     metadata: dict | None = None,
     artwork_bytes: bytes | None = None,
-) -> tuple[bytes, float, float]:
+) -> tuple[bytes, dict]:
     """
-    Master an audio file and return 44.1 kHz / 24-bit WAV bytes plus metrics.
+    Master an audio file and return 44.1 kHz / 24-bit WAV bytes plus full analysis.
 
     Parameters
     ----------
@@ -294,8 +308,14 @@ def master_audio(
 
     Returns
     -------
-    tuple[bytes, float, float] : (24-bit PCM WAV at 44100 Hz stereo,
-                                   integrated LUFS, true-peak dBTP)
+    tuple[bytes, dict] : (24-bit PCM WAV at 44100 Hz stereo, analysis dict)
+        analysis dict keys:
+        - lufs    : integrated loudness (LUFS)
+        - dbtp    : true-peak level (dBTP)
+        - dr      : dynamic range (dB)
+        - duration: audio duration (seconds)
+        - genre   : genre used for mastering
+        - target_lufs : target LUFS requested
     """
     if not PEDALBOARD_AVAILABLE:
         raise RuntimeError(
@@ -322,11 +342,11 @@ def master_audio(
 
     # ── 2. Resample to 44 100 Hz if necessary ───────────────────────────────
     if src_sr != TARGET_SR:
-        from scipy.signal import resample_poly
-        from math import gcd
-        g = gcd(src_sr, TARGET_SR)
-        audio = resample_poly(audio, TARGET_SR // g, src_sr // g, axis=0)
-        audio = audio.astype(np.float32)
+        # Use pedalboard's built-in resampler (no scipy needed)
+        resample_board = Pedalboard([Resample(target_sample_rate=TARGET_SR)])
+        audio_pb = audio.T
+        audio_pb = resample_board.process(audio_pb, sample_rate=src_sr)
+        audio = audio_pb.T.astype(np.float32)
         log.info("Resampled %d → %d Hz", src_sr, TARGET_SR)
     sr = TARGET_SR
     log.info("Load+resample: %.1fs", time.perf_counter() - t0)
@@ -392,6 +412,10 @@ def master_audio(
     t6 = time.perf_counter()
     final_lufs = _lufs(audio, sr)
     final_tp = _true_peak_db(audio)
+    final_dr = _dynamic_range(audio)
+    duration = len(audio) / sr
+    log.info("Final stats: LUFS=%.1f dBTP=%.2f DR=%.1f dB duration=%.1fs",
+             final_lufs, final_tp, final_dr, duration)
     log.info("Final stats: %.1fs", time.perf_counter() - t6)
 
     # ── 9. Encode WAV ────────────────────────────────────────────────────────
@@ -407,7 +431,16 @@ def master_audio(
     total = time.perf_counter() - t0
     log.info("TOTAL: %.1fs (rtf=%.1fx)", total, total / input_dur)
 
-    return wav_bytes, final_lufs, final_tp
+    analysis = {
+        "lufs": round(final_lufs, 1),
+        "dbtp": round(final_tp, 2),
+        "dr": round(final_dr, 1),
+        "duration": round(duration, 2),
+        "genre": genre,
+        "target_lufs": target_lufs,
+        "target_tp_db": target_tp_db,
+    }
+    return wav_bytes, analysis
 
 
 # ─────────────────────────── quick self-test ────────────────────────────────
@@ -425,6 +458,8 @@ if __name__ == "__main__":
     dest = Path(sys.argv[3]) if len(sys.argv) > 3 else src.with_stem(src.stem + "_mastered")
 
     raw = src.read_bytes()
-    out, lufs, tp = master_audio(raw, genre)
+    out, analysis = master_audio(raw, genre)
     dest.write_bytes(out)
-    print(f"✓ Mastered → {dest}  ({len(out)//1024} KB)  LUFS={lufs:.1f}  dBTP={tp:.1f}")
+    print(f"✓ Mastered → {dest}")
+    print(f"  LUFS={analysis['lufs']} | dBTP={analysis['dbtp']} | DR={analysis['dr']} dB | {analysis['duration']}s")
+    print(f"  Genre: {analysis['genre']} | Target: {analysis['target_lufs']} LUFS")

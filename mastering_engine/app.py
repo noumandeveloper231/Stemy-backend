@@ -66,7 +66,7 @@ def _cors_headers() -> dict:
     return {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Expose-Headers":
-            "X-Lufs-Actual, X-Tp-Actual, X-Genre, X-Processing-Time-Ms",
+            "X-Lufs-Actual, X-Tp-Actual, X-DR-Actual, X-Duration-Actual, X-Genre, X-Processing-Time-Ms",
     }
 
 
@@ -201,7 +201,7 @@ def master():
     t_start = time.perf_counter()
     try:
         log.info("[QUICK MASTER] Starting audio processing...")
-        wav_bytes, final_lufs, final_tp = master_audio(
+        wav_bytes, analysis = master_audio(
             raw,
             genre=genre,
             target_lufs=t_lufs,
@@ -222,8 +222,11 @@ def master():
     elapsed_ms = int((time.perf_counter() - t_start) * 1000)
 
     log.info(
-        "Done — genre=%s elapsed=%d ms output=%d KB",
+        "Done — genre=%s lufs=%.1f dbtp=%.2f dr=%.1f elapsed=%d ms output=%d KB",
         genre,
+        analysis["lufs"],
+        analysis["dbtp"],
+        analysis["dr"],
         elapsed_ms,
         len(wav_bytes) // 1024,
     )
@@ -242,8 +245,10 @@ def master():
     response.headers.update({
         **_cors_headers(),
         "X-Genre":               genre,
-        "X-Lufs-Actual":         str(round(final_lufs, 2)),
-        "X-Tp-Actual":           str(round(final_tp, 2)),
+        "X-Lufs-Actual":         str(analysis["lufs"]),
+        "X-Tp-Actual":           str(analysis["dbtp"]),
+        "X-DR-Actual":           str(analysis["dr"]),
+        "X-Duration-Actual":     str(analysis["duration"]),
         "X-Processing-Time-Ms":  str(elapsed_ms),
         "Cache-Control":         "no-store",
     })

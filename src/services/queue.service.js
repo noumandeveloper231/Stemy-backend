@@ -99,6 +99,8 @@ if (redisConnection) {
         // Read loudness from response headers (available immediately)
         const lufs = parseFloat(pythonResponse.headers.get("X-Lufs-Actual")) || -14;
         const dbtp = parseFloat(pythonResponse.headers.get("X-Tp-Actual")) || -1;
+        const dr = parseFloat(pythonResponse.headers.get("X-DR-Actual")) || 6;
+        const duration = parseFloat(pythonResponse.headers.get("X-Duration-Actual")) || 0;
         const pyTime = pythonResponse.headers.get("X-Processing-Time-Ms");
 
         // ── Write mastered audio to temp file + tee to R2 ──────
@@ -127,7 +129,7 @@ if (redisConnection) {
         // Mark complete immediately — user can download NOW
         await prisma.master.update({
           where: { id: masterId },
-          data: { status: "COMPLETE", completedAt: new Date(), lufs, dbtp },
+          data: { status: "COMPLETE", completedAt: new Date(), lufs, dbtp, dr, duration },
         });
         marks.push(T("db_update"));
 

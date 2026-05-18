@@ -58,6 +58,8 @@ model Master {
   status      MasterStatus @default(QUEUED)
   lufs        Float?
   dbtp        Float?
+  dr          Float?
+  duration    Float?
   error       String?
   createdAt   DateTime     @default(now())
   completedAt DateTime?
