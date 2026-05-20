@@ -120,7 +120,7 @@ export const handleStripeWebhook = async (req, res) => {
               await sendEmail({
                 to: user.email,
                 subject: "Your Stemy trial has been cancelled",
-                html: cancellationScheduledEmail(name, formattedEnd),
+                html: cancellationScheduledEmail(name, formattedEnd, env.FRONTEND_URL),
               });
             }
           }
@@ -136,7 +136,7 @@ export const handleStripeWebhook = async (req, res) => {
             await sendEmail({
               to: user.email,
               subject: "Your Stemy subscription has been cancelled",
-              html: cancellationEmail(name),
+              html: cancellationEmail(name, env.FRONTEND_URL),
             });
           }
         }
