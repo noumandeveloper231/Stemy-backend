@@ -114,6 +114,38 @@ export const passwordResetOtpEmail = (otp) => LAYOUT(`
   </table>
 `);
 
+export const cancellationScheduledEmail = (firstName, periodEnd) => LAYOUT(`
+  <h1 style="font-family:'Syne','Unbounded',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:22px;font-weight:700;line-height:1.2;color:#ff8c42;margin:0 0 16px 0;">Your trial has been cancelled</h1>
+  <p style="margin:0 0 12px 0;color:#9ca3af;">Hey ${firstName || 'artist'},</p>
+  <p style="margin:0 0 16px 0;color:#9ca3af;">Your Stemy trial has been cancelled. You will continue to have access until <strong style="color:#f0f2f7;">${periodEnd}</strong>.</p>
+  <p style="margin:0 0 12px 0;color:#9ca3af;">After this date, your subscription will end and you&rsquo;ll lose access to AI mastering.</p>
+  <p style="margin:0 0 12px 0;color:#9ca3af;font-weight:600;">If you change your mind, you can resubscribe anytime before ${periodEnd}:</p>
+  <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+    <tr>
+      <td align="center" style="border-radius:10px;background:linear-gradient(135deg,#1CE783,#4FE9A1);">
+        <a href="https://stemy.ai" target="_blank" style="display:inline-block;padding:14px 28px;font-family:'DM Sans','Inter Tight',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;font-weight:700;color:#052916;text-decoration:none;border-radius:10px;letter-spacing:0.02em;">Resubscribe</a>
+      </td>
+    </tr>
+  </table>
+  <p style="margin:24px 0 0 0;font-size:13px;color:#6b7280;">&mdash; Team Stemy</p>
+`);
+
+export const cancellationEmail = (firstName) => LAYOUT(`
+  <h1 style="font-family:'Syne','Unbounded',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:22px;font-weight:700;line-height:1.2;color:#f0f2f7;margin:0 0 16px 0;">Your subscription has ended</h1>
+  <p style="margin:0 0 12px 0;color:#9ca3af;">Hey ${firstName || 'artist'},</p>
+  <p style="margin:0 0 16px 0;color:#9ca3af;">Your Stemy subscription has ended. Your access to AI mastering has been revoked.</p>
+  <p style="margin:0 0 12px 0;color:#9ca3af;font-weight:600;">Ready to come back? You can resubscribe anytime:</p>
+  <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+    <tr>
+      <td align="center" style="border-radius:10px;background:linear-gradient(135deg,#1CE783,#4FE9A1);">
+        <a href="https://stemy.ai" target="_blank" style="display:inline-block;padding:14px 28px;font-family:'DM Sans','Inter Tight',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;font-weight:700;color:#052916;text-decoration:none;border-radius:10px;letter-spacing:0.02em;">Resubscribe</a>
+      </td>
+    </tr>
+  </table>
+  <p style="margin:24px 0 0 0;color:#9ca3af;">Thanks for giving Stemy a try. If you have any feedback, we&rsquo;d love to hear it.</p>
+  <p style="margin:12px 0 0 0;font-size:13px;color:#6b7280;">&mdash; Team Stemy</p>
+`);
+
 export const trialEndingEmail = (firstName, trialEndsAt, frontendUrl) => LAYOUT(`
   <h1 style="font-family:'Syne','Unbounded',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:22px;font-weight:700;line-height:1.2;color:#ff8c42;margin:0 0 16px 0;">Your trial is ending soon</h1>
   <p style="margin:0 0 12px 0;color:#9ca3af;">Hey ${firstName || 'artist'},</p>

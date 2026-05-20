@@ -126,14 +126,21 @@ export const createCheckoutSession = async (req, res) => {
       });
     }
 
+    const user = await prisma.user.findUnique({
+      where: { id: req.userId },
+      select: { trialUsed: true },
+    });
     const customerId = await ensureStripeCustomerForUser(req.userId);
     const successUrl = buildFrontendUrl("thank-you.html");
     const cancelUrl = buildFrontendUrl("subscription.html?checkout=cancel");
+    const subscriptionData = user?.trialUsed
+      ? { metadata: { userId: req.userId, plan: selected.plan } }
+      : { trial_period_days: env.TRIAL_PERIOD_DAYS, metadata: { userId: req.userId, plan: selected.plan } };
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
       line_items: [{ price: selected.priceId, quantity: 1 }],
-      subscription_data: { trial_period_days: 7, metadata: { userId: req.userId, plan: selected.plan } },
+      subscription_data: subscriptionData,
       success_url: successUrl,
       cancel_url: cancelUrl,
     });

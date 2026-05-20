@@ -21,6 +21,7 @@ model User {
   resetTokenExpiry   DateTime?
   plan                    Plan      @default(BASIC)
   wantsConsoleEarlyAccess Boolean   @default(false)
+  trialUsed               Boolean   @default(false)
 
   subscriptions Subscription[]
   masters        Master[]

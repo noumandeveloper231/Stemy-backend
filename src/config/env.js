@@ -16,6 +16,7 @@ const envSchema = z.object({
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   STRIPE_BASIC_PRICE_ID: z.string().optional(),
   STRIPE_PRO_PRICE_ID: z.string().optional(),
+  TRIAL_PERIOD_DAYS: z.coerce.number().min(1).default(7),
   RESEND_API_KEY: z.string().optional(),
   FROM_EMAIL: z.string().optional(),
   FROM_NAME: z.string().optional(),

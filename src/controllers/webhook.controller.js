@@ -1,6 +1,8 @@
 import { stripe } from "../lib/stripe.js";
 import { env } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
+import { sendEmail } from "../utils/email.js";
+import { cancellationScheduledEmail, cancellationEmail } from "../utils/email-templates.js";
 
 const mapStatus = (status) => {
   if (status === "active") return "ACTIVE";
@@ -94,6 +96,51 @@ export const handleStripeWebhook = async (req, res) => {
             data: updateData,
           });
         }
+
+        if (sub.trial_end) {
+          await prisma.user.update({
+            where: { id: userId },
+            data: { trialUsed: true },
+          });
+        }
+
+        if (event.type === "customer.subscription.updated" && sub.cancel_at_period_end) {
+          const prev = event.data.previous_attributes || {};
+          if (prev.cancel_at_period_end === false) {
+            const user = await prisma.user.findUnique({
+              where: { id: userId },
+              select: { email: true, displayName: true, firstName: true },
+            });
+            if (user?.email) {
+              const name = user.displayName || user.firstName || null;
+              const endDate = new Date((sub.trial_end || sub.current_period_end) * 1000);
+              const formattedEnd = endDate.toLocaleDateString("en-US", {
+                weekday: "long", month: "long", day: "numeric",
+              });
+              await sendEmail({
+                to: user.email,
+                subject: "Your Stemy trial has been cancelled",
+                html: cancellationScheduledEmail(name, formattedEnd),
+              });
+            }
+          }
+        }
+
+        if (event.type === "customer.subscription.deleted") {
+          const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { email: true, displayName: true, firstName: true },
+          });
+          if (user?.email) {
+            const name = user.displayName || user.firstName || null;
+            await sendEmail({
+              to: user.email,
+              subject: "Your Stemy subscription has been cancelled",
+              html: cancellationEmail(name),
+            });
+          }
+        }
+
         console.log("[Stripe Webhook] Subscription synced", {
           action: targetRecord ? "update" : "create",
           userId,
