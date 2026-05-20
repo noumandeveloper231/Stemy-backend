@@ -146,6 +146,35 @@ export const cancellationEmail = (firstName, url) => LAYOUT(`
   <p style="margin:12px 0 0 0;font-size:13px;color:#6b7280;">&mdash; Team Stemy</p>
 `);
 
+export const subscriptionWelcomeEmail = (firstName, plan, trialEndsAt, url) => {
+  const hasTrial = Boolean(trialEndsAt);
+  const endDate = hasTrial
+    ? trialEndsAt.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+    : null;
+  return LAYOUT(`
+  <h1 style="font-family:'Syne','Unbounded',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:22px;font-weight:700;line-height:1.2;color:#f0f2f7;margin:0 0 16px 0;">Welcome to ${plan === 'PRO' ? 'Pro' : 'Basic'}!</h1>
+  <p style="margin:0 0 12px 0;color:#9ca3af;">Hey ${firstName || 'artist'},</p>
+  ${hasTrial
+    ? `<p style="margin:0 0 16px 0;color:#9ca3af;">Your ${plan === 'PRO' ? 'Pro' : 'Basic'} subscription is active with a free trial. Your first payment will be processed on <strong style="color:#f0f2f7;">${endDate}</strong>.</p>`
+    : `<p style="margin:0 0 16px 0;color:#9ca3af;">Your ${plan === 'PRO' ? 'Pro' : 'Basic'} subscription is now active. You have full access to AI mastering.</p>`
+  }
+  <p style="margin:0 0 12px 0;color:#9ca3af;font-weight:600;">Here&rsquo;s what you can do now:</p>
+  <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="margin:0 0 20px 0;">
+    <tr><td style="padding:4px 0;color:#9ca3af;font-size:14px;">&bull; Master unlimited tracks</td></tr>
+    <tr><td style="padding:4px 0;color:#9ca3af;font-size:14px;">&bull; Choose from genre-specific chains</td></tr>
+    <tr><td style="padding:4px 0;color:#9ca3af;font-size:14px;">&bull; Download high-quality 24-bit WAV files</td></tr>
+  </table>
+  <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+    <tr>
+      <td align="center" style="border-radius:10px;background:linear-gradient(135deg,#1CE783,#4FE9A1);">
+        <a href="${url}" target="_blank" style="display:inline-block;padding:14px 28px;font-family:'DM Sans','Inter Tight',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;font-weight:700;color:#052916;text-decoration:none;border-radius:10px;letter-spacing:0.02em;">Start Mastering</a>
+      </td>
+    </tr>
+  </table>
+  <p style="margin:24px 0 0 0;font-size:13px;color:#6b7280;">&mdash; Team Stemy</p>
+`);
+};
+
 export const trialEndingEmail = (firstName, trialEndsAt, frontendUrl) => LAYOUT(`
   <h1 style="font-family:'Syne','Unbounded',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:22px;font-weight:700;line-height:1.2;color:#ff8c42;margin:0 0 16px 0;">Your trial is ending soon</h1>
   <p style="margin:0 0 12px 0;color:#9ca3af;">Hey ${firstName || 'artist'},</p>

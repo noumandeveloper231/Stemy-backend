@@ -2,7 +2,7 @@ import { stripe } from "../lib/stripe.js";
 import { env } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
 import { sendEmail } from "../utils/email.js";
-import { cancellationScheduledEmail, cancellationEmail } from "../utils/email-templates.js";
+import { cancellationScheduledEmail, cancellationEmail, subscriptionWelcomeEmail } from "../utils/email-templates.js";
 
 const mapStatus = (status) => {
   if (status === "active") return "ACTIVE";
@@ -102,6 +102,22 @@ export const handleStripeWebhook = async (req, res) => {
             where: { id: userId },
             data: { trialUsed: true },
           });
+        }
+
+        if (event.type === "customer.subscription.created") {
+          const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { email: true, displayName: true, firstName: true },
+          });
+          if (user?.email) {
+            const name = user.displayName || user.firstName || null;
+            const trialEnd = sub.trial_end ? new Date(sub.trial_end * 1000) : null;
+            await sendEmail({
+              to: user.email,
+              subject: `Welcome to ${updateData.plan === 'PRO' ? 'Pro' : 'Basic'} — Let's make your music sound incredible`,
+              html: subscriptionWelcomeEmail(name, updateData.plan, trialEnd, env.FRONTEND_URL),
+            });
+          }
         }
 
         if (event.type === "customer.subscription.updated" && sub.cancel_at_period_end) {
