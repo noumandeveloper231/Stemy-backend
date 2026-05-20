@@ -125,6 +125,9 @@ def _embed_riff_metadata(
                 "IGNR": metadata.get("genre"),
                 "ICOP": metadata.get("copyright"),
                 "ISRC": metadata.get("isrc"),
+                "ITRK": metadata.get("track"),
+                "ICMW": metadata.get("composer"),
+                "ICMT": metadata.get("comment"),
             }
             for ck_id, val in chunk_map.items():
                 val_str = str(val).strip() if val else ""

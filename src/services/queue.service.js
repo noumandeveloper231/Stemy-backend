@@ -67,12 +67,34 @@ if (redisConnection) {
         if (srcBuf.byteLength > 150 * 1024 * 1024)
           throw new Error("File too large. Maximum size is 150MB");
 
+        // ── Download artwork from R2 if present ─────────────────────────
+        let artBuf = null;
+        if (master.metadata?.artworkUrl) {
+          try {
+            const artSignedUrl = await getDownloadUrl(master.metadata.artworkUrl);
+            const artResp = await fetch(artSignedUrl);
+            if (artResp.ok) {
+              artBuf = await artResp.arrayBuffer();
+              console.log("[QUICK MASTER] Artwork downloaded:", artBuf.byteLength, "bytes");
+            }
+          } catch (artErr) {
+            console.warn("[QUICK MASTER] Failed to download artwork:", artErr.message);
+          }
+        }
+
         // ── Send to Python Mastering Engine ────────────────────
         const formData = new FormData();
         formData.append("file", new Blob([srcBuf], { type: master.sourceMime }), master.sourceName);
         formData.append("genre", master.genre);
-        if (master.metadata) {
-          formData.append("metadata", typeof master.metadata === "string" ? master.metadata : JSON.stringify(master.metadata));
+        const meta = master.metadata;
+        if (meta) {
+          const metaStr = typeof meta === "string" ? meta : JSON.stringify(meta);
+          formData.append("metadata", metaStr);
+        }
+        if (artBuf) {
+          const artUrl = master.metadata?.artworkUrl || "";
+          const artMime = artUrl.endsWith(".png") ? "image/png" : "image/jpeg";
+          formData.append("artwork", new Blob([artBuf], { type: artMime }), "cover." + (artMime === "image/png" ? "png" : "jpg"));
         }
 
         const controller = new AbortController();
